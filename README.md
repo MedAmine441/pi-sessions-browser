@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🌌 Pi Session Browser
 
-## Getting Started
+A stunning, high-performance web interface for browsing and interacting with your local Pi sessions. Built to handle thousands of sessions flawlessly with ultra-fast timeline parsing and native JSONL manipulation.
 
-First, run the development server:
+## ✨ Features
+
+- **Ultra-Fast Timeline**: Extracts timestamps directly from filenames, rendering tens of thousands of session dates in milliseconds without parsing heavy `.jsonl` files.
+- **True Real-Time Streaming**: Implements Server-Sent Events (SSE) instead of traditional polling. The UI reacts instantly to incoming AI messages with zero lag.
+- **Native JSONL Manipulation**:
+  - **In-App Creation**: Start a pristine new session directly from the browser; no terminal required.
+  - **Session Renaming**: Dynamically rewrite the underlying `.jsonl` headers by simply clicking the title.
+  - **Inline Message Editing**: Fix typos in past messages; the backend surgically rewrites historical lines inside the `.jsonl` file.
+- **Dynamic Routing**: Clean URL architecture (`/[date]?session=[file]`) utilizing Next.js App Router for deep-linking and snappy transitions.
+- **Cinematic UI**: Powered by Tailwind CSS, featuring glassmorphism, micro-animations, and a highly immersive ambient background canvas (Liquid & Embers).
+
+## 🚀 Tech Stack
+
+- **Framework**: Next.js 15 (App Router)
+- **Language**: TypeScript
+- **Styling**: Tailwind CSS
+- **Icons**: Lucide React
+- **Animations**: `tailwindcss-animate`, Custom WebGL/Canvas
+
+## 🛠️ Getting Started
+
+### 1. Installation
+
+Clone the repository and install the dependencies:
+
+```bash
+git clone https://github.com/yourusername/pi-session-browser.git
+cd pi-session-browser
+npm install
+```
+
+### 2. Configuration
+
+The application automatically reads your Pi sessions from the default local directory:
+`~/.pi/agent/sessions/--home-pc--`
+
+*(Note: The root directory is managed in `src/lib/pi-sessions.ts`)*
+
+### 3. Run the Development Server
+
+Start the blazing-fast Turbopack dev server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the timeline.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 📁 Project Architecture
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `src/app/page.tsx`: The root timeline, rendering the fast date aggregates.
+- `src/app/[date]/page.tsx`: Dynamic routing for a specific date, lazy-loading heavy JSONL parsing.
+- `src/components/ChatModal.tsx`: The core SSE chat interface for viewing, renaming, and editing sessions.
+- `src/lib/pi-sessions.ts`: The Node.js FS backend engine for reading, modifying, and creating valid Pi `.jsonl` log files.
 
-## Learn More
+## 🤝 Contributing
 
-To learn more about Next.js, take a look at the following resources:
+Contributions, issues, and feature requests are welcome!
+Feel free to check out the [issues page](https://github.com/yourusername/pi-session-browser/issues).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 📝 License
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+This project is [MIT](https://choosealicense.com/licenses/mit/) licensed.
