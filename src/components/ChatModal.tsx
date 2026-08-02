@@ -172,7 +172,11 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: ()
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ file: sessionDetail.file, message })
       });
-      if (!res.ok) throw new Error("Failed to send message");
+      if (!res.ok) {
+        let errMsg = "Failed to send message";
+        try { const data = await res.json(); if (data.error) errMsg = data.error; } catch (e) {}
+        throw new Error(errMsg);
+      }
     } catch (err: any) {
       alert(err.message);
     } finally {

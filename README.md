@@ -1,6 +1,8 @@
 # 🌌 Pi Session Browser
 
-A stunning, high-performance web interface for browsing and interacting with your local Pi sessions. Built to handle thousands of sessions flawlessly with ultra-fast timeline parsing and native JSONL manipulation.
+> **Note:** This application is designed exclusively for people who use the **Pi coding agent on Linux**.
+
+A stunning, high-performance interface designed for people using the Pi coding agent with Linux to browse and interact with their local Pi sessions. Built to handle thousands of sessions flawlessly with ultra-fast timeline parsing and native JSONL manipulation.
 
 ## ✨ Features
 
@@ -49,6 +51,41 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the timeline.
+
+### 4. Building the Desktop App (Electron)
+
+You can build a standalone desktop version of the application using Electron:
+
+```bash
+# Build the application (Next.js standalone + Electron)
+npm run electron:build
+```
+
+> **Customizing the App Icon**: The build will automatically use the icon file located at `build/icon.svg`. If you want to use your own icon (e.g. `.png`), simply place it in the `build/` folder, delete `icon.svg`, and update the `"icon"` field in the `package.json` build config before running the build command.
+
+### 5. Creating a Desktop Shortcut
+
+Follow these steps to properly integrate the AppImage into your Linux desktop:
+
+On Linux, the build produces an `.AppImage` in the `dist/` folder. AppImages do not automatically add themselves to your application launcher. To make it appear in your app search and show the correct icon in your taskbar:
+1. Create a file named `pi-session-browser.desktop` in `~/.local/share/applications/` with the following content (make sure to replace `/path/to/...` with your actual absolute paths):
+```ini
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Pi Session Browser
+Comment=Pi Session Browser
+Exec="/path/to/pi-session-browser/v2/dist/Pi Session Browser-0.1.0.AppImage" --no-sandbox
+Icon=/path/to/pi-session-browser/v2/build/icon.svg
+Terminal=false
+Categories=Utility;
+StartupWMClass=pi-session-browser
+```
+2. Make the file executable so your desktop environment recognizes it:
+```bash
+chmod +x ~/.local/share/applications/pi-session-browser.desktop
+```
+*(Optional)*: If you want a shortcut on your physical desktop as well, you can copy this file to your `~/Desktop/` folder.
 
 ## 📁 Project Architecture
 

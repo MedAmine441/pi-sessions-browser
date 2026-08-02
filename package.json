@@ -1,13 +1,45 @@
 {
-  "name": "v2",
+  "name": "pi-session-browser",
   "version": "0.1.0",
+  "description": "Pi Session Browser Desktop Application",
+  "author": "medamine441",
   "private": true,
+  "main": "main.js",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest"
+    "test": "vitest",
+    "electron:dev": "electron .",
+    "build:standalone": "cp -r public .next/standalone/ && mkdir -p .next/standalone/.next && cp -r .next/static .next/standalone/.next/ && mv .next/standalone/node_modules .next/standalone/standalone_node_modules",
+    "electron:build": "npm run build && npm run build:standalone && electron-builder -l"
+  },
+  "build": {
+    "appId": "com.pi.sessionbrowser",
+    "productName": "Pi Session Browser",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": ".next/standalone",
+        "to": ".next/standalone",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "linux": {
+      "target": "AppImage",
+      "category": "Utility",
+      "icon": "build/icon.svg"
+    }
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -26,6 +58,8 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "tailwindcss": "^4",

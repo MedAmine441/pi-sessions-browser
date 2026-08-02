@@ -211,12 +211,44 @@ export async function launchNewSession(targetCwd?: string) {
 
 export async function sendChatMessage(file: string, message: string) {
   return new Promise<void>((resolve, reject) => {
-    const child = spawn(piCommand, ["--session", file, "-p", message], {
-      stdio: "ignore",
-      env: process.env,
-    });
-    child.once("error", (error) => reject(error));
-    child.once("close", () => resolve());
+    const isWin = process.platform === "win32";
+    if (isWin) {
+      const child = spawn(piCommand, ["--session", file, "-p", message], {
+        stdio: "ignore",
+        env: process.env,
+        shell: true,
+      });
+      child.once("error", (error) => reject(error));
+      child.once("close", (code) => {
+        if (code !== 0 && code !== null) reject(new Error(`Process exited with code ${code}`));
+        else resolve();
+      });
+    } else {
+      // Use an interactive shell (-ic) to ensure aliases (like 'pi') are expanded.
+      // Pass file and message as environment variables to prevent shell injection.
+      const child = spawn("bash", ["-ic", `${piCommand} --session "$PI_FILE" -p "$PI_MESSAGE"`], {
+        stdio: ["ignore", "ignore", "pipe"],
+        env: {
+          ...process.env,
+          PI_FILE: file,
+          PI_MESSAGE: message,
+        },
+      });
+      
+      let stderr = "";
+      if (child.stderr) {
+        child.stderr.on("data", (data) => stderr += data.toString());
+      }
+      
+      child.once("error", (error) => reject(error));
+      child.once("close", (code) => {
+        if (code !== 0 && code !== null) {
+          reject(new Error(`Message failed to send. Code ${code}. Error: ${stderr.trim()}`));
+        } else {
+          resolve();
+        }
+      });
+    }
   });
 }
 
