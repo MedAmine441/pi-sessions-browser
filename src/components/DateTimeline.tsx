@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Clock, Plus } from "lucide-react";
 import { formatReadableDate } from "@/lib/utils";
 
@@ -16,13 +16,35 @@ export default function DateTimeline() {
   const [page, setPage] = useState(1);
   const pageSize = 20;
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const location = searchParams.get("location") || "";
+  const fromDate = searchParams.get("fromDate") || "";
+  const toDate = searchParams.get("toDate") || "";
 
   useEffect(() => {
-    fetch("/api/dates")
+    let url = "/api/dates";
+    if (location) {
+      url += `?location=${encodeURIComponent(location)}`;
+    }
+    fetch(url)
       .then(r => r.json())
-      .then(d => { setDates(d); setLoading(false); })
+      .then(d => {
+        let filtered = Array.isArray(d) ? d : [];
+        if (fromDate) {
+          const [y, m, day] = fromDate.split('-');
+          const fromTime = new Date(Number(y), Number(m) - 1, Number(day)).getTime();
+          filtered = filtered.filter(item => new Date(item.date).getTime() >= fromTime);
+        }
+        if (toDate) {
+          const [y, m, day] = toDate.split('-');
+          const toTime = new Date(Number(y), Number(m) - 1, Number(day), 23, 59, 59, 999).getTime();
+          filtered = filtered.filter(item => new Date(item.date).getTime() <= toTime);
+        }
+        setDates(filtered);
+        setLoading(false);
+      })
       .catch(e => { console.error(e); setLoading(false); });
-  }, []);
+  }, [location, fromDate, toDate]);
 
   const launchNewSession = async () => {
     try {
@@ -84,7 +106,7 @@ export default function DateTimeline() {
                       key={d.date}
                       role="button"
                       tabIndex={0}
-                      onClick={() => router.push(`/${encodeURIComponent(d.date)}`)}
+                      onClick={() => router.push(`/${encodeURIComponent(d.date)}?${searchParams.toString()}`)}
                       className="group relative bg-stone-900/60 backdrop-blur-2xl border border-white/10 hover:bg-amber-900/30 hover:border-amber-500/50 p-6 rounded-3xl cursor-pointer transition-all duration-300 hover:scale-105 shadow-xl hover:shadow-[0_10px_40px_rgba(59,130,246,0.3)]"
                     >
                       <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity" />

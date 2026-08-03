@@ -85,10 +85,32 @@ function summarize(file: string, stat: any, entries: any[]) {
   };
 }
 
-export async function listDates() {
+export async function getLocations() {
+  await initCanonicalRoot();
+  try {
+    const entries = await fs.readdir(canonicalRoot, { withFileTypes: true });
+    return entries.filter(e => e.isDirectory()).map(e => e.name);
+  } catch (error: any) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+export function getDefaultLocation() {
+  return homedir().replace(/\//g, "-").replace(/^-+/, "--");
+}
+
+export async function listDates(location?: string) {
   await initCanonicalRoot();
   let files;
-  try { files = await walk(canonicalRoot); }
+  try { 
+    const targetDir = location ? resolve(canonicalRoot, location) : canonicalRoot;
+    const safeTarget = await fs.realpath(targetDir).catch(() => null);
+    if (!safeTarget || !safeTarget.startsWith(canonicalRoot)) {
+      return [];
+    }
+    files = await walk(safeTarget); 
+  }
   catch (error: any) {
     if (error?.code === "ENOENT") return [];
     throw error;
@@ -114,10 +136,17 @@ export async function listDates() {
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
 
-export async function listSessions(targetDate?: string) {
+export async function listSessions(targetDate?: string, location?: string) {
   await initCanonicalRoot();
   let files;
-  try { files = await walk(canonicalRoot); }
+  try { 
+    const targetDir = location ? resolve(canonicalRoot, location) : canonicalRoot;
+    const safeTarget = await fs.realpath(targetDir).catch(() => null);
+    if (!safeTarget || !safeTarget.startsWith(canonicalRoot)) {
+      return [];
+    }
+    files = await walk(safeTarget); 
+  }
   catch (error: any) {
     if (error?.code === "ENOENT") return [];
     throw error;

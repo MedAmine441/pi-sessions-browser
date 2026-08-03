@@ -5,7 +5,8 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const date = searchParams.get("date") || undefined;
-    const sessions = await listSessions(date);
+    const location = searchParams.get("location") || undefined;
+    const sessions = await listSessions(date, location);
     return NextResponse.json(sessions);
   } catch (error: any) {
     console.error(error);

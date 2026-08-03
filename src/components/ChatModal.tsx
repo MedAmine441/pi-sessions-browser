@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
 import { Message, SessionDetail } from "@/types";
 
@@ -158,12 +159,40 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: ()
     }
   };
 
+  const router = useRouter();
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim() || !sessionDetail) return;
     
     const message = chatInput.trim();
     setChatInput("");
+
+    if (message === "/quit") {
+      onClose();
+      return;
+    }
+
+    if (message === "/new") {
+      try {
+        const res = await fetch("/api/new-session", { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to create new session");
+        
+        onClose();
+        if (data.file) {
+          const today = new Date().toLocaleDateString();
+          // Keep search params like location and filters intact
+          const params = new URLSearchParams(window.location.search);
+          params.set("session", data.file);
+          router.push(`/${encodeURIComponent(today)}?${params.toString()}`);
+        }
+      } catch (err: any) {
+        alert(err.message);
+      }
+      return;
+    }
+
     setIsThinking(true);
     
     try {

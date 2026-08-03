@@ -16,11 +16,16 @@ export default function SessionsGrid({ date }: { date: string }) {
   
   // Read open session from query param ?session=file
   const openSessionFile = searchParams.get("session");
+  const location = searchParams.get("location") || "";
 
   const fetchSessions = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/sessions?date=${encodeURIComponent(date)}`);
+      let url = `/api/sessions?date=${encodeURIComponent(date)}`;
+      if (location) {
+        url += `&location=${encodeURIComponent(location)}`;
+      }
+      const res = await fetch(url);
       if (!res.ok) throw new Error("Failed to fetch sessions");
       const data = await res.json();
       setSessions(data);
@@ -33,7 +38,7 @@ export default function SessionsGrid({ date }: { date: string }) {
 
   useEffect(() => {
     fetchSessions();
-  }, [date]);
+  }, [date, location]);
 
   const handleDeleteClick = async (e: React.MouseEvent, file: string) => {
     e.preventDefault();
@@ -81,7 +86,7 @@ export default function SessionsGrid({ date }: { date: string }) {
       <div className="p-6 md:p-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shrink-0">
         <div className="flex items-center gap-4">
           <button
-            onClick={() => router.push("/")}
+            onClick={() => router.push(`/?${searchParams.toString()}`)}
             className="flex items-center gap-2 px-4 py-2 bg-stone-900/60 hover:bg-stone-800/80 border border-white/10 rounded-xl text-stone-300 hover:text-white transition-all backdrop-blur-md group"
           >
             <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
