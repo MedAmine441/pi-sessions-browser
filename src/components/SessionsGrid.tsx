@@ -53,7 +53,7 @@ export default function SessionsGrid({ date }: { date: string }) {
     setSessions(prev => prev.filter(s => s.file !== file));
     
     try {
-      const res = await fetch(`/api/session?file=${encodeURIComponent(file)}`, { method: 'DELETE' });
+      const res = await fetch(`/api/sessions?file=${encodeURIComponent(file)}`, { method: 'DELETE' });
       if (!res.ok) throw new Error("Failed to delete session");
       fetchSessions();
     } catch (err) {
