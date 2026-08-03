@@ -30,7 +30,7 @@ A stunning, high-performance interface designed for people using the Pi coding a
 Clone the repository and install the dependencies:
 
 ```bash
-git clone https://github.com/yourusername/pi-session-browser.git
+git clone https://github.com/medamine441/pi-session-browser.git
 cd pi-session-browser
 npm install
 ```
@@ -97,7 +97,7 @@ chmod +x ~/.local/share/applications/pi-session-browser.desktop
 ## 🤝 Contributing
 
 Contributions, issues, and feature requests are welcome!
-Feel free to check out the [issues page](https://github.com/yourusername/pi-session-browser/issues).
+Feel free to check out the [issues page](https://github.com/medamine441/pi-session-browser/issues).
 
 ## 📝 License
 
