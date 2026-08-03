@@ -83,7 +83,7 @@ export default function SessionsGrid({ date }: { date: string }) {
   return (
     <div className="w-full h-full flex flex-col pointer-events-auto">
       {/* HUD Header overlay */}
-      <div className="p-6 md:p-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shrink-0">
+      <div className="p-6 md:p-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shrink-0 pl-14 md:pl-8">
         <div className="flex items-center gap-4">
           <button
             onClick={() => router.push(`/?${searchParams.toString()}`)}

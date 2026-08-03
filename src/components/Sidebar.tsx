@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { FolderGit2, Calendar, ChevronRight } from "lucide-react";
+import { FolderGit2, Menu, X } from "lucide-react";
 
 export default function Sidebar() {
   const router = useRouter();
@@ -11,10 +11,9 @@ export default function Sidebar() {
   
   const [locations, setLocations] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isOpen, setIsOpen] = useState(false);
   
   const currentLocation = searchParams.get("location") || "";
-  const fromDate = searchParams.get("fromDate") || "";
-  const toDate = searchParams.get("toDate") || new Date().toISOString().split("T")[0];
 
   useEffect(() => {
     fetch("/api/locations")
@@ -22,7 +21,7 @@ export default function Sidebar() {
       .then(data => {
         setLocations(data.locations || []);
         if (!currentLocation && data.defaultLocation) {
-          updateFilters({ location: data.defaultLocation });
+          updateLocation(data.defaultLocation);
         }
         setLoading(false);
       })
@@ -32,24 +31,10 @@ export default function Sidebar() {
       });
   }, []);
 
-  const updateFilters = (updates: { location?: string, fromDate?: string, toDate?: string }) => {
+  const updateLocation = (location: string) => {
     const params = new URLSearchParams(searchParams.toString());
-    
-    if (updates.location !== undefined) {
-      if (updates.location) params.set("location", updates.location);
-      else params.delete("location");
-    }
-    
-    if (updates.fromDate !== undefined) {
-      if (updates.fromDate) params.set("fromDate", updates.fromDate);
-      else params.delete("fromDate");
-    }
-    
-    if (updates.toDate !== undefined) {
-      if (updates.toDate) params.set("toDate", updates.toDate);
-      else params.delete("toDate");
-    }
-    
+    if (location) params.set("location", location);
+    else params.delete("location");
     router.replace(`${pathname}?${params.toString()}`);
   };
 
@@ -58,75 +43,81 @@ export default function Sidebar() {
   };
 
   return (
-    <div className="w-64 border-r border-white/10 bg-stone-950/50 backdrop-blur-md h-full flex flex-col pointer-events-auto p-4 shrink-0">
-      <div className="mb-8 mt-4 px-2">
-        <h2 className="text-xl font-black text-amber-500 tracking-tight flex items-center gap-2">
-          Filters
-        </h2>
-      </div>
+    <>
+      {/* Mobile Burger Button */}
+      <button 
+        onClick={() => setIsOpen(true)}
+        className="md:hidden fixed top-6 left-4 z-40 p-2 bg-stone-900/80 backdrop-blur-md border border-white/10 rounded-xl text-stone-300 hover:text-white"
+      >
+        <Menu className="w-5 h-5" />
+      </button>
 
-      <div className="space-y-6 flex-1 overflow-y-auto custom-scrollbar pr-2">
-        {/* Location Filter */}
-        <div className="space-y-3">
-          <label className="text-xs font-bold text-stone-400 uppercase tracking-wider flex items-center gap-2">
-            <FolderGit2 className="w-4 h-4" /> Location
-          </label>
-          <div className="space-y-1">
-            {loading ? (
-              <div className="text-sm text-stone-500 animate-pulse px-2">Loading...</div>
-            ) : locations.length === 0 ? (
-              <div className="text-sm text-stone-500 px-2">No locations found</div>
-            ) : (
-              <select 
-                value={currentLocation}
-                onChange={(e) => updateFilters({ location: e.target.value })}
-                className="w-full bg-stone-900 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-stone-300 focus:outline-none focus:border-amber-500/50 transition-colors cursor-pointer"
+      {/* Mobile Overlay */}
+      {isOpen && (
+        <div 
+          className="md:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
+          onClick={() => setIsOpen(false)}
+        />
+      )}
+
+      {/* Sidebar Container */}
+      <div className={`
+        fixed md:relative top-0 left-0 h-full z-50
+        w-72 border-r border-white/10 bg-stone-950/90 backdrop-blur-xl flex flex-col pointer-events-auto p-4 shrink-0
+        transition-transform duration-300 ease-in-out
+        ${isOpen ? 'translate-x-0' : '-translate-x-full'} 
+        md:translate-x-0
+      `}>
+        <div className="mb-6 mt-2 px-2 flex items-center justify-between">
+          <h2 className="text-xl font-black text-amber-500 tracking-tight flex items-center gap-2">
+            Locations
+          </h2>
+          <button 
+            className="md:hidden p-1 text-stone-400 hover:text-white"
+            onClick={() => setIsOpen(false)}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-1">
+          {loading ? (
+            <div className="text-sm text-stone-500 animate-pulse px-2">Loading locations...</div>
+          ) : locations.length === 0 ? (
+            <div className="text-sm text-stone-500 px-2">No locations found</div>
+          ) : (
+            <>
+              <button
+                onClick={() => { updateLocation(""); setIsOpen(false); }}
+                className={`w-full text-left px-3 py-3 rounded-xl transition-all flex items-center gap-3 ${
+                  currentLocation === "" 
+                    ? "bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold shadow-[0_0_15px_rgba(217,119,6,0.1)]" 
+                    : "text-stone-400 hover:bg-stone-900 border border-transparent hover:text-stone-200"
+                }`}
               >
-                <option value="">All Locations</option>
-                {locations.map(loc => (
-                  <option key={loc} value={loc}>
-                    {decodeLocation(loc)}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-        </div>
-
-        {/* Date Filters */}
-        <div className="space-y-3 pt-4 border-t border-white/5">
-          <label className="text-xs font-bold text-stone-400 uppercase tracking-wider flex items-center gap-2">
-            <Calendar className="w-4 h-4" /> Date Range
-          </label>
-          
-          <div className="space-y-3">
-            <div>
-              <div className="text-[10px] text-stone-500 mb-1 ml-1 font-semibold uppercase">From</div>
-              <input 
-                type="date"
-                value={fromDate}
-                onChange={(e) => updateFilters({ fromDate: e.target.value })}
-                className="w-full bg-stone-900 border border-white/10 rounded-xl px-3 py-2 text-sm text-stone-300 focus:outline-none focus:border-amber-500/50 transition-colors"
-                placeholder="Forever"
-              />
-            </div>
-            
-            <div className="flex justify-center">
-              <ChevronRight className="w-4 h-4 text-stone-600 rotate-90" />
-            </div>
-
-            <div>
-              <div className="text-[10px] text-stone-500 mb-1 ml-1 font-semibold uppercase">To</div>
-              <input 
-                type="date"
-                value={toDate}
-                onChange={(e) => updateFilters({ toDate: e.target.value })}
-                className="w-full bg-stone-900 border border-white/10 rounded-xl px-3 py-2 text-sm text-stone-300 focus:outline-none focus:border-amber-500/50 transition-colors"
-              />
-            </div>
-          </div>
+                <FolderGit2 className="w-4 h-4 shrink-0" />
+                <span className="truncate text-sm">All Locations</span>
+              </button>
+              
+              {locations.map(loc => (
+                <button
+                  key={loc}
+                  onClick={() => { updateLocation(loc); setIsOpen(false); }}
+                  className={`w-full text-left px-3 py-3 rounded-xl transition-all flex items-center gap-3 ${
+                    currentLocation === loc
+                      ? "bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold shadow-[0_0_15px_rgba(217,119,6,0.1)]" 
+                      : "text-stone-400 hover:bg-stone-900 border border-transparent hover:text-stone-200"
+                  }`}
+                  title={decodeLocation(loc)}
+                >
+                  <FolderGit2 className="w-4 h-4 shrink-0" />
+                  <span className="truncate text-sm">{decodeLocation(loc)}</span>
+                </button>
+              ))}
+            </>
+          )}
         </div>
       </div>
-    </div>
+    </>
   );
 }
