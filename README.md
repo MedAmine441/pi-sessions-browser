@@ -30,8 +30,8 @@ A stunning, high-performance interface designed for people using the Pi coding a
 Clone the repository and install the dependencies:
 
 ```bash
-git clone https://github.com/medamine441/pi-session-browser.git
-cd pi-session-browser
+git clone https://github.com/medamine441/pi-sessions-browser.git
+cd pi-sessions-browser
 npm install
 ```
 
@@ -40,7 +40,7 @@ npm install
 The application automatically reads your Pi sessions from the default local directory:
 `~/.pi/agent/sessions/--home-pc--`
 
-*(Note: The root directory is managed in `src/lib/pi-sessions.ts`)*
+_(Note: The root directory is managed in `src/lib/pi-sessions.ts`)_
 
 ### 3. Run the Development Server
 
@@ -68,24 +68,29 @@ npm run electron:build
 Follow these steps to properly integrate the AppImage into your Linux desktop:
 
 On Linux, the build produces an `.AppImage` in the `dist/` folder. AppImages do not automatically add themselves to your application launcher. To make it appear in your app search and show the correct icon in your taskbar:
-1. Create a file named `pi-session-browser.desktop` in `~/.local/share/applications/` with the following content (make sure to replace `/path/to/...` with your actual absolute paths):
+
+1. Create a file named `pi-sessions-browser.desktop` in `~/.local/share/applications/` with the following content (make sure to replace `/path/to/...` with your actual absolute paths):
+
 ```ini
 [Desktop Entry]
 Version=1.0
 Type=Application
 Name=Pi Session Browser
 Comment=Pi Session Browser
-Exec="/path/to/pi-session-browser/v2/dist/Pi Session Browser-0.1.0.AppImage" --no-sandbox
-Icon=/path/to/pi-session-browser/v2/build/icon.svg
+Exec="/path/to/pi-sessions-browser/v2/dist/Pi Session Browser-0.1.0.AppImage" --no-sandbox
+Icon=/path/to/pi-sessions-browser/v2/build/icon.svg
 Terminal=false
 Categories=Utility;
-StartupWMClass=pi-session-browser
+StartupWMClass=pi-sessions-browser
 ```
+
 2. Make the file executable so your desktop environment recognizes it:
+
 ```bash
-chmod +x ~/.local/share/applications/pi-session-browser.desktop
+chmod +x ~/.local/share/applications/pi-sessions-browser.desktop
 ```
-*(Optional)*: If you want a shortcut on your physical desktop as well, you can copy this file to your `~/Desktop/` folder.
+
+_(Optional)_: If you want a shortcut on your physical desktop as well, you can copy this file to your `~/Desktop/` folder.
 
 ## 📁 Project Architecture
 
@@ -97,7 +102,7 @@ chmod +x ~/.local/share/applications/pi-session-browser.desktop
 ## 🤝 Contributing
 
 Contributions, issues, and feature requests are welcome!
-Feel free to check out the [issues page](https://github.com/medamine441/pi-session-browser/issues).
+Feel free to check out the [issues page](https://github.com/medamine441/pi-sessions-browser/issues).
 
 ## 📝 License
 

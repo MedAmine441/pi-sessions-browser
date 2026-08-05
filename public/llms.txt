@@ -1,0 +1,22 @@
+# Pi Session Browser
+
+> A local-only web and desktop interface for browsing, resuming, and editing sessions created by the Pi coding agent on Linux. It reads and rewrites Pi's `.jsonl` session logs directly from the user's own machine.
+
+Pi Session Browser runs entirely on `localhost` against the current user's filesystem (sessions are read from `~/.pi/agent/sessions/`). It serves no public content and stores no data remotely, so there is nothing here to index or train on. Sessions are grouped by date on the timeline, then opened individually in a live view backed by Server-Sent Events.
+
+Navigation model: the timeline at `/` lists dates that have sessions. Selecting a date opens `/[date]`, which lists that date's sessions. Selecting a session adds a `?session=[file]` query parameter, which opens the session dialog over the list. A `?location=[dir]` parameter filters everything to one project directory, and `?fromDate=`/`?toDate=` bound the timeline range.
+
+## Pages
+
+- [Timeline](/): Home page. Lists every date that has recorded sessions, with a session count per date, plus the date-range filter and the "New Session" action.
+- [Sessions for a date](/[date]): Lists the sessions recorded on one date. Each entry links to its session and offers "Resume in terminal" and "Delete".
+- [Session view](/[date]?session=[file]): Dialog showing one session's full message history, streamed live. Supports renaming the session, editing past messages, and sending new messages.
+
+## Docs
+
+- [README](https://github.com/medamine441/pi-sessions-browser/blob/main/v2/README.md): Setup, configuration, Electron desktop build, and project architecture.
+- [Issues](https://github.com/medamine441/pi-sessions-browser/issues): Bug reports and feature requests.
+
+## Optional
+
+- [MIT License](https://choosealicense.com/licenses/mit/): The license this project is released under.

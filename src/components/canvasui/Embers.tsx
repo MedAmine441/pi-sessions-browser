@@ -120,11 +120,12 @@ export default function Embers() {
     };
     window.addEventListener("resize", handleResize);
 
-    let animationFrameId: number;
+    let animationFrameId = 0;
+    let running = false;
 
     const render = () => {
       ctx.clearRect(0, 0, width, height);
-      
+
       ctx.globalCompositeOperation = "screen";
 
       particles.forEach((p) => {
@@ -134,18 +135,45 @@ export default function Embers() {
       animationFrameId = requestAnimationFrame(render);
     };
 
-    render();
+    // Decorative animation only: skip the render loop entirely when the user
+    // has asked for reduced motion, which also frees up the main thread.
+    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+    const start = () => {
+      if (running || motionQuery.matches) return;
+      running = true;
+      animationFrameId = requestAnimationFrame(render);
+    };
+
+    const stop = () => {
+      running = false;
+      cancelAnimationFrame(animationFrameId);
+    };
+
+    const handleMotionChange = () => {
+      if (motionQuery.matches) {
+        stop();
+        ctx.clearRect(0, 0, width, height);
+      } else {
+        start();
+      }
+    };
+    motionQuery.addEventListener("change", handleMotionChange);
+
+    start();
 
     return () => {
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("resize", handleResize);
-      cancelAnimationFrame(animationFrameId);
+      motionQuery.removeEventListener("change", handleMotionChange);
+      stop();
     };
   }, []);
 
   return (
     <canvas
       ref={canvasRef}
+      aria-hidden="true"
       className="absolute inset-0 pointer-events-none z-0"
     />
   );
