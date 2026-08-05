@@ -58,14 +58,17 @@ function MessageItem({ m, formatDate, onEdit }: { m: Message; formatDate: (d: st
             <div className="text-[10px] text-stone-500 font-mono">{formatDate(m.timestamp)}</div>
             {isTool && (
               /* Stretched toggle: the whole header row activates it, while staying a
-                 single real button with an expanded state in the a11y tree. */
+                 single real button with an expanded state in the a11y tree. The press
+                 nudge is off for the same reason as the session card: translating the
+                 button would re-anchor its stretched ::after to the button itself
+                 mid-click, so the release would miss it. */
               <Button
                 variant="ghost"
                 size="icon-xs"
                 onClick={() => setIsOpen(!isOpen)}
                 aria-expanded={isOpen}
                 aria-label={`${isOpen ? "Collapse" : "Expand"} ${toolLabel} output`}
-                className="rounded-full bg-white/5 hover:bg-white/10 dark:hover:bg-white/10 text-stone-400 hover:text-stone-200 after:absolute after:inset-0 after:content-['']"
+                className="rounded-full bg-white/5 hover:bg-white/10 dark:hover:bg-white/10 text-stone-400 hover:text-stone-200 active:translate-none! after:absolute after:inset-0 after:content-['']"
               >
                 {isOpen ? <ChevronUp className="w-3.5 h-3.5" aria-hidden="true" /> : <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />}
               </Button>

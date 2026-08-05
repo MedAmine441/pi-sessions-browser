@@ -175,12 +175,16 @@ export default function SessionsGrid({ date }: { date: string }) {
                   >
                     <div className="flex justify-between items-start gap-2 mb-3">
                       {/* Stretched button: the whole card activates it, but it stays a real
-                          button in the a11y tree and never nests the row actions inside it. */}
+                          button in the a11y tree and never nests the row actions inside it.
+                          It opts out of the shared press nudge — a translate would make the
+                          button a containing block, shrinking the stretched ::after to the
+                          button's own box between mousedown and mouseup, so the click would
+                          land on the card instead of here. */}
                       <h2 className="min-w-0 flex-1 text-lg font-bold">
                         <Button
                           variant="ghost"
                           onClick={() => handleSessionClick(s.file)}
-                          className="h-auto w-full justify-start rounded-none bg-transparent p-0 text-left text-lg font-bold text-stone-200 hover:bg-transparent dark:hover:bg-transparent hover:text-amber-300 group-hover:text-amber-300 focus-visible:border-transparent focus-visible:ring-0 after:absolute after:inset-0 after:rounded-3xl after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-amber-400/70"
+                          className="h-auto w-full justify-start rounded-none bg-transparent p-0 text-left text-lg font-bold text-stone-200 hover:bg-transparent dark:hover:bg-transparent hover:text-amber-300 group-hover:text-amber-300 focus-visible:border-transparent focus-visible:ring-0 active:translate-none! after:absolute after:inset-0 after:rounded-3xl after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-amber-400/70"
                         >
                           <span className="truncate">{title}</span>
                         </Button>
