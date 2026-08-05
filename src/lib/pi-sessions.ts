@@ -161,7 +161,23 @@ async function readSessionCwd(file: string) {
   }
 }
 
-async function cwdOfDir(name: string) {
+/**
+ * A session Pi has never written a message to holds nothing worth browsing, so
+ * it is left out of the listings entirely.
+ */
+async function hasMessages(file: string) {
+  try {
+    const { size } = await fs.stat(file);
+    // Nothing that large can be an untouched session, and reading it would hurt.
+    if (size > maxSessionBytes) return true;
+    const raw = await fs.readFile(file, "utf8");
+    return raw.includes('"type":"message"');
+  } catch {
+    return false;
+  }
+}
+
+async function inspectDir(name: string) {
   const dir = resolve(canonicalRoot, name);
   let sessions: string[] = [];
   try {
@@ -169,11 +185,16 @@ async function cwdOfDir(name: string) {
   } catch {
     /* Unreadable directories fall back to the decoded name. */
   }
-  for (const session of sessions.slice(0, 3)) {
-    const cwd = await readSessionCwd(resolve(dir, session));
-    if (cwd) return cwd;
+
+  let cwd: string | null = null;
+  let used = false;
+  for (const session of sessions) {
+    const file = resolve(dir, session);
+    if (!cwd) cwd = await readSessionCwd(file);
+    if (!used) used = await hasMessages(file);
+    if (cwd && used) break;
   }
-  return await decodeDirName(name);
+  return { cwd: cwd || (await decodeDirName(name)), used };
 }
 
 /**
@@ -186,22 +207,28 @@ async function locationIndex() {
   try {
     entries = await fs.readdir(canonicalRoot, { withFileTypes: true });
   } catch (error: any) {
-    if (error?.code === "ENOENT") return new Map<string, string[]>();
+    if (error?.code === "ENOENT") return new Map<string, { dirs: string[]; used: boolean }>();
     throw error;
   }
 
   const names = entries.filter((e) => e.isDirectory()).map((e) => e.name);
-  const cwds = await Promise.all(names.map(cwdOfDir));
-  const index = new Map<string, string[]>();
+  const inspected = await Promise.all(names.map(inspectDir));
+  const index = new Map<string, { dirs: string[]; used: boolean }>();
   names.forEach((name, i) => {
-    index.set(cwds[i], [...(index.get(cwds[i]) || []), name]);
+    const { cwd, used } = inspected[i];
+    const entry = index.get(cwd) || { dirs: [], used: false };
+    index.set(cwd, { dirs: [...entry.dirs, name], used: entry.used || used });
   });
   return index;
 }
 
+/** Only folders that still hold a session worth opening. */
 export async function getLocations() {
   const index = await locationIndex();
-  return [...index.keys()].sort((a, b) => a.localeCompare(b));
+  return [...index]
+    .filter(([, entry]) => entry.used)
+    .map(([path]) => path)
+    .sort((a, b) => a.localeCompare(b));
 }
 
 export function getDefaultLocation() {
@@ -236,9 +263,11 @@ async function collectFiles(location?: string) {
   if (location) {
     const index = await locationIndex();
     // Older links carried the raw directory name rather than the cwd.
-    const dirs = index.get(location) || (
-      [...index.values()].flat().includes(location) ? [location] : []
-    );
+    const dirs =
+      index.get(location)?.dirs ||
+      ([...index.values()].flatMap((entry) => entry.dirs).includes(location)
+        ? [location]
+        : []);
     targets = dirs.map((dir) => resolve(canonicalRoot, dir));
   }
 
@@ -261,7 +290,9 @@ async function collectFiles(location?: string) {
 }
 
 export async function listDates(location?: string) {
-  const files = await collectFiles(location);
+  const all = await collectFiles(location);
+  const used = await Promise.all(all.map(hasMessages));
+  const files = all.filter((_, i) => used[i]);
 
   const dates: Record<string, number> = {};
   for (const file of files) {
@@ -327,10 +358,10 @@ export async function listSessions(targetDate?: string, location?: string) {
   );
 
   return loaded
-    .filter(Boolean)
-    .sort(
-      (a: any, b: any) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
-    );
+    .filter((session): session is NonNullable<typeof session> =>
+      Boolean(session && session.messageCount > 0),
+    )
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 }
 
 export async function getConversation(file: string) {
@@ -409,6 +440,27 @@ export async function launchSession(file: string) {
 
 export async function deleteSession(file: string) {
   await fs.unlink(file);
+  await pruneEmptyDir(file);
+}
+
+/**
+ * A session that was opened and closed without ever being written to is not
+ * worth keeping, so closing it throws it away rather than leaving an empty
+ * card behind.
+ */
+export async function discardIfEmpty(file: string) {
+  if (await hasMessages(file)) return false;
+  await deleteSession(file);
+  return true;
+}
+
+/** Drops a location's folder once its last session is gone. */
+async function pruneEmptyDir(file: string) {
+  await initCanonicalRoot();
+  const dir = dirname(file);
+  if (dir === canonicalRoot || !dir.startsWith(`${canonicalRoot}${sep}`)) return;
+  const remaining = await fs.readdir(dir).catch(() => null);
+  if (remaining?.length === 0) await fs.rmdir(dir).catch(() => {});
 }
 
 export async function launchNewSession(targetCwd?: string) {

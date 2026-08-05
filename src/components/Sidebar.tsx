@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { FolderGit2, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { shortenPath } from "@/lib/utils";
+import { LOCATIONS_CHANGED, shortenPath } from "@/lib/utils";
 
 export default function Sidebar() {
   const router = useRouter();
@@ -36,19 +36,36 @@ export default function Sidebar() {
       .finally(() => setLoading(false));
   }, []);
 
-  // A session created in a folder nothing was stored for yet adds a location
-  // this list has never seen.
+  // Creating or deleting a session can add or retire a whole location.
   useEffect(() => {
-    if (loading || !currentLocation || locations.includes(currentLocation)) return;
-    loadLocations().catch(err => console.error(err));
-  }, [currentLocation, loading]);
+    const onChanged = () =>
+      loadLocations()
+        .then(data => {
+          // Nothing is left in the folder being viewed, so stop viewing it.
+          if (currentLocation && !(data.locations || []).includes(currentLocation)) {
+            updateLocation("");
+          }
+        })
+        .catch(err => console.error(err));
+    window.addEventListener(LOCATIONS_CHANGED, onChanged);
+    return () => window.removeEventListener(LOCATIONS_CHANGED, onChanged);
+  }, [currentLocation]);
 
   const updateLocation = (location: string) => {
-    const params = new URLSearchParams(searchParams.toString());
+    // Read the live URL: this also runs from an event fired while another
+    // component is mid-navigation, and the rendered snapshot can lag behind.
+    const params = new URLSearchParams(window.location.search);
     if (location) params.set("location", location);
     else params.delete("location");
     router.replace(`${pathname}?${params.toString()}`);
   };
+
+  // A session that has just been created has no messages yet, so its folder is
+  // not a location the API reports — show it anyway while it is being viewed.
+  const shown =
+    currentLocation && !locations.includes(currentLocation)
+      ? [...locations, currentLocation].sort((a, b) => a.localeCompare(b))
+      : locations;
 
   const itemClasses = (isActive: boolean) =>
     `h-auto w-full justify-start gap-3 rounded-xl border px-3 py-3 text-left transition-all ${
@@ -110,7 +127,7 @@ export default function Sidebar() {
         <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
           {loading ? (
             <p className="text-sm text-stone-500 animate-pulse px-2">Loading locations...</p>
-          ) : locations.length === 0 ? (
+          ) : shown.length === 0 ? (
             <p className="text-sm text-stone-500 px-2">No locations found</p>
           ) : (
             <ul className="space-y-1">
@@ -126,7 +143,7 @@ export default function Sidebar() {
                 </Button>
               </li>
 
-              {locations.map(loc => (
+              {shown.map(loc => (
                 <li key={loc}>
                   <Button
                     variant="ghost"

@@ -5,6 +5,16 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/**
+ * Fired whenever a session is created or removed: a folder only counts as a
+ * location while it holds sessions, so the sidebar has to look again.
+ */
+export const LOCATIONS_CHANGED = "pi-sessions:locations-changed";
+
+export function announceLocationsChanged() {
+  window.dispatchEvent(new Event(LOCATIONS_CHANGED));
+}
+
 /** Drops the home prefix so paths read as "pc" and "pc/Pictures". */
 export function shortenPath(path: string) {
   return path.replace(/^\/(?:home|Users)\//, "") || path;

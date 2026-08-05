@@ -4,7 +4,11 @@ import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Folder, Trash2, ArrowLeft, RefreshCw, Terminal } from "lucide-react";
 import { SessionInfo } from "@/types";
-import { formatReadableDate, shortenPath } from "@/lib/utils";
+import {
+  announceLocationsChanged,
+  formatReadableDate,
+  shortenPath,
+} from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import ChatModal from "./ChatModal";
 
@@ -59,6 +63,7 @@ export default function SessionsGrid({ date }: { date: string }) {
         { method: "DELETE" },
       );
       if (!res.ok) throw new Error("Failed to delete session");
+      announceLocationsChanged();
       fetchSessions();
     } catch (err) {
       console.error(err);
@@ -87,10 +92,20 @@ export default function SessionsGrid({ date }: { date: string }) {
     router.replace(`/${encodeURIComponent(date)}?${params.toString()}`);
   };
 
-  const closeSession = () => {
+  const closeSession = async (discardIfEmpty = true) => {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("session");
     router.replace(`/${encodeURIComponent(date)}?${params.toString()}`);
+
+    // A session closed without a single message never became anything.
+    if (discardIfEmpty && openSessionFile) {
+      await fetch("/api/sessions/discard", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file: openSessionFile }),
+      }).catch((err) => console.error(err));
+    }
+    announceLocationsChanged();
     fetchSessions(); // Refresh list to get new preview/counts
   };
 

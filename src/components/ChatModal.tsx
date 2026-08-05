@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
 import { Message, SessionDetail } from "@/types";
@@ -111,7 +111,7 @@ function MessageItem({ m, formatDate, onEdit }: { m: Message; formatDate: (d: st
   );
 }
 
-export default function ChatModal({ file, onClose }: { file: string; onClose: () => void }) {
+export default function ChatModal({ file, onClose }: { file: string; onClose: (discardIfEmpty?: boolean) => void }) {
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null);
   const [hideToolCalls, setHideToolCalls] = useState(true);
   const [isRenaming, setIsRenaming] = useState(false);
@@ -120,6 +120,11 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: ()
   const [isThinking, setIsThinking] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Pi owns the file once it is running in a terminal, so it must not be
+  // thrown away for being empty.
+  const resumedRef = useRef(false);
+
+  const close = useCallback(() => onClose(!resumedRef.current), [onClose]);
 
   useEffect(() => {
     const saved = localStorage.getItem("piSessionBrowser_hideToolCalls");
@@ -154,11 +159,11 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: ()
   // Escape closes the dialog, matching the backdrop click.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") close();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, [close]);
 
   const handleEditMessage = async (messageId: string, newText: string) => {
     if (!sessionDetail) return;
@@ -199,6 +204,7 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: ()
         body: JSON.stringify({ file: sessionDetail.file })
       });
       if (!res.ok) throw new Error("Failed to resume session");
+      resumedRef.current = true;
     } catch (err: any) {
       alert(err.message);
     }
@@ -214,21 +220,27 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: ()
     setChatInput("");
 
     if (message === "/quit") {
-      onClose();
+      close();
       return;
     }
 
     if (message === "/new") {
       try {
-        const res = await fetch("/api/new-session", { method: "POST" });
+        // Carry on in the folder this session belongs to.
+        const res = await fetch("/api/new-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cwd: sessionDetail.cwd }),
+        });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Failed to create new session");
 
-        onClose();
+        close();
         if (data.file) {
           const today = new Date().toLocaleDateString();
           // Keep search params like location and filters intact
           const params = new URLSearchParams(window.location.search);
+          if (sessionDetail.cwd) params.set("location", sessionDetail.cwd);
           params.set("session", data.file);
           router.push(`/${encodeURIComponent(today)}?${params.toString()}`);
         }
@@ -274,7 +286,7 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: ()
       {/* Backdrop click to close */}
       <div
         className="fixed inset-0 pointer-events-auto cursor-zoom-out bg-black/20 backdrop-blur-sm"
-        onClick={onClose}
+        onClick={close}
         aria-hidden="true"
       />
 
@@ -342,7 +354,7 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: ()
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={onClose}
+                onClick={close}
                 className="rounded-full bg-white/5 hover:bg-white/20 dark:hover:bg-white/20 text-stone-300 hover:text-white"
                 aria-label="Close session"
               >
