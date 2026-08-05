@@ -10,14 +10,26 @@ import {
   shortenPath,
 } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import ChatModal from "./ChatModal";
+
+const titleOf = (session: SessionInfo) =>
+  session.name || session.preview || "Untitled Session";
 
 export default function SessionsGrid({ date }: { date: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<SessionInfo | null>(null);
 
   // Read open session from query param ?session=file
   const openSessionFile = searchParams.get("session");
@@ -45,21 +57,21 @@ export default function SessionsGrid({ date }: { date: string }) {
     fetchSessions();
   }, [date, location]);
 
-  const handleDeleteClick = async (e: React.MouseEvent, file: string) => {
+  const handleDeleteClick = (e: React.MouseEvent, session: SessionInfo) => {
     e.preventDefault();
     e.stopPropagation();
+    setPendingDelete(session);
+  };
 
-    if (confirmDelete !== file) {
-      setConfirmDelete(file);
-      return;
-    }
-
-    setConfirmDelete(null);
-    setSessions((prev) => prev.filter((s) => s.file !== file));
+  const deleteSession = async () => {
+    const session = pendingDelete;
+    if (!session) return;
+    setPendingDelete(null);
+    setSessions((prev) => prev.filter((s) => s.file !== session.file));
 
     try {
       const res = await fetch(
-        `/api/sessions?file=${encodeURIComponent(file)}`,
+        `/api/sessions?file=${encodeURIComponent(session.file)}`,
         { method: "DELETE" },
       );
       if (!res.ok) throw new Error("Failed to delete session");
@@ -167,7 +179,7 @@ export default function SessionsGrid({ date }: { date: string }) {
           ) : (
             <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {sessions.map((s) => {
-                const title = s.name || s.preview || "Untitled Session";
+                const title = titleOf(s);
                 return (
                   <li
                     key={s.id}
@@ -203,22 +215,10 @@ export default function SessionsGrid({ date }: { date: string }) {
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={(e) => handleDeleteClick(e, s.file)}
-                          className={`rounded-xl ${
-                            confirmDelete === s.file
-                              ? "bg-red-500/20 text-red-400 hover:bg-red-500/40 dark:hover:bg-red-500/40 hover:text-red-300"
-                              : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 bg-black/20 hover:bg-red-500/20 dark:hover:bg-red-500/20 text-stone-400 hover:text-red-400"
-                          }`}
-                          title={
-                            confirmDelete === s.file
-                              ? "Click again to confirm"
-                              : "Delete session"
-                          }
-                          aria-label={
-                            confirmDelete === s.file
-                              ? `Confirm deletion of "${title}"`
-                              : `Delete "${title}"`
-                          }
+                          onClick={(e) => handleDeleteClick(e, s)}
+                          className="rounded-xl opacity-0 group-hover:opacity-100 focus-visible:opacity-100 bg-black/20 hover:bg-red-500/20 dark:hover:bg-red-500/20 text-stone-400 hover:text-red-400"
+                          title="Delete session"
+                          aria-label={`Delete "${title}"`}
                         >
                           <Trash2 className="w-4 h-4" aria-hidden="true" />
                         </Button>
@@ -258,6 +258,41 @@ export default function SessionsGrid({ date }: { date: string }) {
       {openSessionFile && (
         <ChatModal file={openSessionFile} onClose={closeSession} />
       )}
+
+      <Dialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => !open && setPendingDelete(null)}
+      >
+        <DialogContent className="border border-white/10 bg-stone-950/95 backdrop-blur-2xl sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete this session?</DialogTitle>
+            <DialogDescription>
+              {pendingDelete && (
+                <>
+                  <span className="text-stone-200">
+                    “{titleOf(pendingDelete)}”
+                  </span>{" "}
+                  and its {pendingDelete.messageCount}{" "}
+                  {pendingDelete.messageCount === 1 ? "message" : "messages"}{" "}
+                  will be removed from{" "}
+                  <span className="font-mono break-all">
+                    {shortenPath(pendingDelete.cwd)}
+                  </span>
+                  . This cannot be undone.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button variant="destructive" onClick={deleteSession}>
+              <Trash2 aria-hidden="true" /> Delete session
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
