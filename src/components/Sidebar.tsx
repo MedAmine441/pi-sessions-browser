@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { FolderGit2, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { shortenPath } from "@/lib/utils";
 
 export default function Sidebar() {
   const router = useRouter();
@@ -37,10 +38,6 @@ export default function Sidebar() {
     if (location) params.set("location", location);
     else params.delete("location");
     router.replace(`${pathname}?${params.toString()}`);
-  };
-
-  const decodeLocation = (loc: string) => {
-    return loc.replace(/^--/, "").replace(/--$/, "").replace(/-/g, "/");
   };
 
   const itemClasses = (isActive: boolean) =>
@@ -126,10 +123,10 @@ export default function Sidebar() {
                     onClick={() => { updateLocation(loc); setIsOpen(false); }}
                     aria-current={currentLocation === loc ? "true" : undefined}
                     className={itemClasses(currentLocation === loc)}
-                    title={decodeLocation(loc)}
+                    title={loc}
                   >
                     <FolderGit2 className="w-4 h-4 shrink-0" aria-hidden="true" />
-                    <span className="truncate text-sm">{decodeLocation(loc)}</span>
+                    <span className="truncate text-sm">{shortenPath(loc)}</span>
                   </Button>
                 </li>
               ))}

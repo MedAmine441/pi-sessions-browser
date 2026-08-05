@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Folder, Trash2, ArrowLeft, RefreshCw, Terminal } from "lucide-react";
 import { SessionInfo } from "@/types";
-import { formatReadableDate } from "@/lib/utils";
+import { formatReadableDate, shortenPath } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import ChatModal from "./ChatModal";
 
@@ -208,7 +208,9 @@ export default function SessionsGrid({ date }: { date: string }) {
 
                     <div className="flex items-center gap-2 text-xs font-mono text-stone-500 mb-4 relative z-10 pointer-events-none">
                       <Folder className="w-3 h-3" aria-hidden="true" />
-                      <span className="truncate">{s.cwd}</span>
+                      <span className="truncate" title={s.cwd}>
+                        {shortenPath(s.cwd)}
+                      </span>
                     </div>
 
                     <div className="flex items-center justify-between mt-auto pt-4 border-t border-white/5 relative z-10 pointer-events-none">

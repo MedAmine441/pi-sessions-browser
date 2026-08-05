@@ -5,6 +5,11 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/** Drops the home prefix so paths read as "pc" and "pc/Pictures". */
+export function shortenPath(path: string) {
+  return path.replace(/^\/(?:home|Users)\//, "") || path;
+}
+
 export function getOrdinalSuffix(i: number) {
   const j = i % 10,
         k = i % 100;

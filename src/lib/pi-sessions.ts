@@ -108,37 +108,138 @@ function summarize(file: string, stat: any, entries: any[]) {
   };
 }
 
-export async function getLocations() {
-  await initCanonicalRoot();
+/** Pi encodes a session's cwd as its directory name: /home/pc -> --home-pc-- */
+function encodeCwd(cwd: string) {
+  return `--${cwd.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\//g, "-")}--`;
+}
+
+/**
+ * The encoding is lossy — a "-" in a folder name is indistinguishable from a
+ * separator — so this walks the real filesystem, taking the longest segment
+ * that exists at each step. Only used for directories with no session to read
+ * the cwd from; a path that no longer exists degrades to the naive split.
+ */
+async function decodeDirName(name: string) {
+  const parts = name.replace(/^-+/, "").replace(/-+$/, "").split("-");
+  let path = "";
+  for (let i = 0; i < parts.length; ) {
+    let matched = 0;
+    for (let end = parts.length; end > i; end--) {
+      const candidate = `${path}/${parts.slice(i, end).join("-")}`;
+      const isDir = await fs
+        .stat(candidate)
+        .then((s) => s.isDirectory())
+        .catch(() => false);
+      if (isDir) {
+        path = candidate;
+        matched = end;
+        break;
+      }
+    }
+    if (!matched) return `${path}/${parts.slice(i).join("/")}`;
+    i = matched;
+  }
+  return path;
+}
+
+/** Reads the cwd out of a session's header line without loading the whole file. */
+async function readSessionCwd(file: string) {
+  let handle;
   try {
-    const entries = await fs.readdir(canonicalRoot, { withFileTypes: true });
-    return entries.filter((e) => e.isDirectory()).map((e) => e.name);
+    handle = await fs.open(file, "r");
+    const { buffer, bytesRead } = await handle.read({
+      buffer: Buffer.alloc(8192),
+      position: 0,
+    });
+    const header = buffer.subarray(0, bytesRead).toString("utf8").split("\n")[0];
+    const cwd = JSON.parse(header)?.cwd;
+    return typeof cwd === "string" && cwd ? cwd : null;
+  } catch {
+    return null;
+  } finally {
+    await handle?.close();
+  }
+}
+
+async function cwdOfDir(name: string) {
+  const dir = resolve(canonicalRoot, name);
+  let sessions: string[] = [];
+  try {
+    sessions = (await fs.readdir(dir)).filter((f) => f.endsWith(".jsonl")).sort();
+  } catch {
+    /* Unreadable directories fall back to the decoded name. */
+  }
+  for (const session of sessions.slice(0, 3)) {
+    const cwd = await readSessionCwd(resolve(dir, session));
+    if (cwd) return cwd;
+  }
+  return await decodeDirName(name);
+}
+
+/**
+ * Directories are grouped by the real cwd they hold sessions for, so variants
+ * of the same path (--home-pc and --home-pc--) show up as a single location.
+ */
+async function locationIndex() {
+  await initCanonicalRoot();
+  let entries;
+  try {
+    entries = await fs.readdir(canonicalRoot, { withFileTypes: true });
   } catch (error: any) {
-    if (error?.code === "ENOENT") return [];
+    if (error?.code === "ENOENT") return new Map<string, string[]>();
     throw error;
   }
+
+  const names = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+  const cwds = await Promise.all(names.map(cwdOfDir));
+  const index = new Map<string, string[]>();
+  names.forEach((name, i) => {
+    index.set(cwds[i], [...(index.get(cwds[i]) || []), name]);
+  });
+  return index;
+}
+
+export async function getLocations() {
+  const index = await locationIndex();
+  return [...index.keys()].sort((a, b) => a.localeCompare(b));
 }
 
 export function getDefaultLocation() {
-  return homedir().replace(/\//g, "-").replace(/^-+/, "--");
+  return homedir();
+}
+
+async function collectFiles(location?: string) {
+  await initCanonicalRoot();
+  let targets = [canonicalRoot];
+  if (location) {
+    const index = await locationIndex();
+    // Older links carried the raw directory name rather than the cwd.
+    const dirs = index.get(location) || (
+      [...index.values()].flat().includes(location) ? [location] : []
+    );
+    targets = dirs.map((dir) => resolve(canonicalRoot, dir));
+  }
+
+  const files: string[] = [];
+  for (const target of targets) {
+    const safeTarget = await fs.realpath(target).catch(() => null);
+    if (
+      !safeTarget ||
+      !(safeTarget === canonicalRoot || safeTarget.startsWith(`${canonicalRoot}${sep}`))
+    ) {
+      continue;
+    }
+    try {
+      files.push(...(await walk(safeTarget)));
+    } catch (error: any) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  return files;
 }
 
 export async function listDates(location?: string) {
-  await initCanonicalRoot();
-  let files;
-  try {
-    const targetDir = location
-      ? resolve(canonicalRoot, location)
-      : canonicalRoot;
-    const safeTarget = await fs.realpath(targetDir).catch(() => null);
-    if (!safeTarget || !safeTarget.startsWith(canonicalRoot)) {
-      return [];
-    }
-    files = await walk(safeTarget);
-  } catch (error: any) {
-    if (error?.code === "ENOENT") return [];
-    throw error;
-  }
+  const files = await collectFiles(location);
 
   const dates: Record<string, number> = {};
   for (const file of files) {
@@ -166,21 +267,7 @@ export async function listDates(location?: string) {
 }
 
 export async function listSessions(targetDate?: string, location?: string) {
-  await initCanonicalRoot();
-  let files;
-  try {
-    const targetDir = location
-      ? resolve(canonicalRoot, location)
-      : canonicalRoot;
-    const safeTarget = await fs.realpath(targetDir).catch(() => null);
-    if (!safeTarget || !safeTarget.startsWith(canonicalRoot)) {
-      return [];
-    }
-    files = await walk(safeTarget);
-  } catch (error: any) {
-    if (error?.code === "ENOENT") return [];
-    throw error;
-  }
+  let files = await collectFiles(location);
 
   if (targetDate) {
     files = files.filter((file) => {
@@ -379,8 +466,7 @@ export async function createNewSessionFile(targetCwd?: string) {
   const timestamp = new Date().toISOString();
 
   // Format matches standard pi session path: ~/.pi/agent/sessions/--cwd--/timestamp_uuid.jsonl
-  const encodedCwd = cwd.replace(/\//g, "-").replace(/^-+/, "--");
-  const sessionDir = resolve(sessionRoot, encodedCwd);
+  const sessionDir = resolve(sessionRoot, encodeCwd(cwd));
   await fs.mkdir(sessionDir, { recursive: true });
 
   const filename = `${timestamp.replace(/[:.]/g, "-")}_${id}.jsonl`;
