@@ -208,6 +208,28 @@ export function getDefaultLocation() {
   return homedir();
 }
 
+/** Backs the folder picker: sub-directories of `target`, defaulting to home. */
+export async function listDirectories(target?: string) {
+  const path = resolve(target || homedir());
+  const entries = await fs.readdir(path, { withFileTypes: true });
+  const named = await Promise.all(
+    entries.map(async (entry) => {
+      if (entry.isDirectory()) return entry.name;
+      if (!entry.isSymbolicLink()) return null;
+      const linked = await fs.stat(resolve(path, entry.name)).catch(() => null);
+      return linked?.isDirectory() ? entry.name : null;
+    }),
+  );
+  const parent = dirname(path);
+  return {
+    path,
+    parent: parent === path ? null : parent,
+    directories: named
+      .filter((name): name is string => Boolean(name))
+      .sort((a, b) => a.localeCompare(b)),
+  };
+}
+
 async function collectFiles(location?: string) {
   await initCanonicalRoot();
   let targets = [canonicalRoot];
@@ -408,11 +430,23 @@ export async function launchNewSession(targetCwd?: string) {
 }
 
 export async function sendChatMessage(file: string, message: string) {
-  return new Promise<void>((resolve, reject) => {
+  // Pi has to run in the session's own folder, not wherever the app was started.
+  const recorded = await readSessionCwd(file);
+  const cwd =
+    recorded &&
+    (await fs
+      .stat(recorded)
+      .then((s) => s.isDirectory())
+      .catch(() => false))
+      ? recorded
+      : homedir();
+
+  return new Promise<void>((done, reject) => {
     const isWin = process.platform === "win32";
     if (isWin) {
       const child = spawn(piCommand, ["--session", file, "-p", message], {
         stdio: "ignore",
+        cwd,
         env: process.env,
         shell: true,
       });
@@ -420,7 +454,7 @@ export async function sendChatMessage(file: string, message: string) {
       child.once("close", (code) => {
         if (code !== 0 && code !== null)
           reject(new Error(`Process exited with code ${code}`));
-        else resolve();
+        else done();
       });
     } else {
       // Use an interactive shell (-ic) to ensure aliases (like 'pi') are expanded.
@@ -430,6 +464,7 @@ export async function sendChatMessage(file: string, message: string) {
         ["-ic", `${piCommand} --session "$PI_FILE" -p "$PI_MESSAGE"`],
         {
           stdio: ["ignore", "ignore", "pipe"],
+          cwd,
           env: {
             ...process.env,
             PI_FILE: file,
@@ -452,7 +487,7 @@ export async function sendChatMessage(file: string, message: string) {
             ),
           );
         } else {
-          resolve();
+          done();
         }
       });
     }
@@ -461,7 +496,9 @@ export async function sendChatMessage(file: string, message: string) {
 
 export async function createNewSessionFile(targetCwd?: string) {
   await initCanonicalRoot();
-  const cwd = targetCwd || homedir();
+  const cwd = resolve(targetCwd || homedir());
+  const stat = await fs.stat(cwd).catch(() => null);
+  if (!stat?.isDirectory()) throw new Error(`${cwd} is not a folder.`);
   const id = randomUUID();
   const timestamp = new Date().toISOString();
 

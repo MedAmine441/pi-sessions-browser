@@ -7,8 +7,11 @@ import {
   Plus,
   Calendar as CalendarIcon,
   ChevronRight,
+  Folder,
+  Layers,
 } from "lucide-react";
-import { formatReadableDate } from "@/lib/utils";
+import { formatReadableDate, shortenPath } from "@/lib/utils";
+import FolderPicker from "./FolderPicker";
 import { usePathname } from "next/navigation";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -29,6 +32,7 @@ export default function DateTimeline() {
   const [dates, setDates] = useState<DateItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [pickingFolder, setPickingFolder] = useState(false);
   const pageSize = 20;
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -95,24 +99,36 @@ export default function DateTimeline() {
       });
   }, [location, fromDate, toDate]);
 
-  const launchNewSession = async () => {
+  const createSessionIn = async (cwd: string) => {
+    setPickingFolder(false);
     try {
-      const res = await fetch("/api/new-session", { method: "POST" });
+      const res = await fetch("/api/new-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd }),
+      });
       const data = await res.json();
       if (!res.ok)
         throw new Error(data.error || "Failed to create new session");
 
       if (data.file) {
-        // Go to today's date page, and wait, how do we open the modal?
-        // We probably need to pass ?session=file parameter!
+        // Today's page opens the session straight into the chat modal, with the
+        // sidebar following the folder the session was created in.
+        const params = new URLSearchParams(searchParams.toString());
+        params.set("location", cwd);
+        params.set("session", data.file);
         const today = new Date().toLocaleDateString();
-        router.push(
-          `/${encodeURIComponent(today)}?session=${encodeURIComponent(data.file)}`,
-        );
+        router.push(`/${encodeURIComponent(today)}?${params.toString()}`);
       }
     } catch (err: any) {
       alert(err.message);
     }
+  };
+
+  // With every location shown at once there is no folder to infer, so ask.
+  const launchNewSession = () => {
+    if (location) createSessionIn(location);
+    else setPickingFolder(true);
   };
 
   const totalPages = Math.ceil(dates.length / pageSize);
@@ -121,10 +137,31 @@ export default function DateTimeline() {
     <div className="w-full h-full flex flex-col pointer-events-auto">
       {/* HUD Header overlay (Search and branding) */}
       <div className="p-6 md:p-8 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 shrink-0">
-        <div className="flex items-center gap-4 pointer-events-auto pl-10 md:pl-0">
-          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tighter bg-gradient-to-br from-white via-amber-200 to-amber-500 bg-clip-text text-transparent flex items-center gap-3 drop-shadow-lg">
-            Pi Sessions Browser
-          </h1>
+        <div className="flex items-center gap-4 pointer-events-auto pl-10 md:pl-0 min-w-0">
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-stone-500 mb-1">
+              {location ? "Folder" : "Showing"}
+            </p>
+            <h1
+              className="text-2xl md:text-3xl font-extrabold tracking-tighter bg-linear-to-br from-white via-amber-200 to-amber-500 bg-clip-text text-transparent flex items-center gap-3 drop-shadow-lg"
+              title={location || "Every folder with sessions"}
+            >
+              {location ? (
+                <Folder
+                  className="w-6 h-6 shrink-0 text-amber-400"
+                  aria-hidden="true"
+                />
+              ) : (
+                <Layers
+                  className="w-6 h-6 shrink-0 text-amber-400"
+                  aria-hidden="true"
+                />
+              )}
+              <span className="truncate">
+                {location ? shortenPath(location) : "All Locations"}
+              </span>
+            </h1>
+          </div>
         </div>
 
         {/* Date Filters Centered */}
@@ -230,9 +267,15 @@ export default function DateTimeline() {
         <div className="flex items-center gap-4 w-full lg:w-auto pointer-events-auto">
           <Button
             onClick={launchNewSession}
+            title={
+              location
+                ? `New session in ${location}`
+                : "Pick a folder for the new session"
+            }
             className="h-auto w-full lg:w-auto gap-2 px-6 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-bold shadow-[0_0_20px_rgba(217,119,6,0.3)] hover:shadow-[0_0_30px_rgba(217,119,6,0.5)] hover:-translate-y-0.5"
           >
             <Plus className="w-5 h-5" aria-hidden="true" /> New Session
+            {location ? "" : "…"}
           </Button>
         </div>
       </div>
@@ -335,6 +378,13 @@ export default function DateTimeline() {
           </section>
         </div>
       </div>
+
+      {pickingFolder && (
+        <FolderPicker
+          onCancel={() => setPickingFolder(false)}
+          onSelect={createSessionIn}
+        />
+      )}
     </div>
   );
 }

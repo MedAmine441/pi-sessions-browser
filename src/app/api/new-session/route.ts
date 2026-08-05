@@ -3,7 +3,9 @@ import { createNewSessionFile } from "@/lib/pi-sessions";
 
 export async function POST(request: Request) {
   try {
-    const file = await createNewSessionFile();
+    const body = await request.json().catch(() => ({}));
+    const cwd = typeof body?.cwd === "string" && body.cwd ? body.cwd : undefined;
+    const file = await createNewSessionFile(cwd);
     return NextResponse.json({ success: true, file });
   } catch (error: any) {
     console.error(error);

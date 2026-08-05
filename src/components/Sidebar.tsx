@@ -17,21 +17,31 @@ export default function Sidebar() {
 
   const currentLocation = searchParams.get("location") || "";
 
-  useEffect(() => {
+  const loadLocations = () =>
     fetch("/api/locations")
       .then(r => r.json())
       .then(data => {
         setLocations(data.locations || []);
+        return data;
+      });
+
+  useEffect(() => {
+    loadLocations()
+      .then(data => {
         if (!currentLocation && data.defaultLocation) {
           updateLocation(data.defaultLocation);
         }
-        setLoading(false);
       })
-      .catch(err => {
-        console.error(err);
-        setLoading(false);
-      });
+      .catch(err => console.error(err))
+      .finally(() => setLoading(false));
   }, []);
+
+  // A session created in a folder nothing was stored for yet adds a location
+  // this list has never seen.
+  useEffect(() => {
+    if (loading || !currentLocation || locations.includes(currentLocation)) return;
+    loadLocations().catch(err => console.error(err));
+  }, [currentLocation, loading]);
 
   const updateLocation = (location: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -84,7 +94,7 @@ export default function Sidebar() {
       `}>
         <div className="mb-6 mt-2 px-2 flex items-center justify-between">
           <h2 className="text-xl font-black text-amber-500 tracking-tight flex items-center gap-2">
-            Locations
+            Pi Sessions Browser
           </h2>
           <Button
             variant="ghost"
