@@ -159,6 +159,20 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: ()
     }
   };
 
+  const handleResumeClick = async () => {
+    if (!sessionDetail) return;
+    try {
+      const res = await fetch("/api/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file: sessionDetail.file })
+      });
+      if (!res.ok) throw new Error("Failed to resume session");
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   const router = useRouter();
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -272,12 +286,21 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: ()
           </div>
           
           <div className="flex flex-col items-end gap-4 shrink-0">
-            <button 
-              onClick={onClose}
-              className="p-2 bg-white/5 hover:bg-white/20 rounded-full transition-colors self-end"
-            >
-              <X className="w-5 h-5 text-stone-300" />
-            </button>
+            <div className="flex items-center gap-3 self-end">
+              <button
+                onClick={handleResumeClick}
+                className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/40 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+                title="Resume in Terminal"
+              >
+                <Terminal className="w-4 h-4" /> Resume
+              </button>
+              <button 
+                onClick={onClose}
+                className="p-2 bg-white/5 hover:bg-white/20 rounded-full transition-colors"
+              >
+                <X className="w-5 h-5 text-stone-300" />
+              </button>
+            </div>
             <div className="flex items-center gap-3">
               <label className="flex items-center gap-2 text-xs font-semibold text-stone-400 uppercase tracking-widest cursor-pointer hover:text-white transition-colors">
                 <input 

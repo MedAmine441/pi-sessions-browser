@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Folder, Trash2, ArrowLeft, RefreshCw } from "lucide-react";
+import { Folder, Trash2, ArrowLeft, RefreshCw, Terminal } from "lucide-react";
 import { SessionInfo } from "@/types";
 import { formatReadableDate } from "@/lib/utils";
 import ChatModal from "./ChatModal";
@@ -59,6 +59,21 @@ export default function SessionsGrid({ date }: { date: string }) {
     } catch (err) {
       console.error(err);
       fetchSessions();
+    }
+  };
+
+  const handleResumeClick = async (e: React.MouseEvent, file: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      const res = await fetch("/api/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file })
+      });
+      if (!res.ok) throw new Error("Failed to resume session");
+    } catch (err: any) {
+      alert(err.message);
     }
   };
 
@@ -125,20 +140,29 @@ export default function SessionsGrid({ date }: { date: string }) {
                   className="group bg-stone-900/40 hover:bg-stone-800/60 backdrop-blur-xl border border-white/5 hover:border-amber-500/30 p-5 rounded-3xl cursor-pointer transition-all duration-300 relative overflow-hidden"
                 >
                   <div className="flex justify-between items-start mb-3 relative z-10">
-                    <h3 className="text-lg font-bold text-stone-200 group-hover:text-amber-300 transition-colors truncate pr-12">
+                    <h3 className="text-lg font-bold text-stone-200 group-hover:text-amber-300 transition-colors truncate pr-20">
                       {s.name || s.preview || "Untitled Session"}
                     </h3>
-                    <button
-                      onClick={(e) => handleDeleteClick(e, s.file)}
-                      className={`absolute right-0 top-0 p-2 rounded-xl transition-all ${
-                        confirmDelete === s.file 
-                          ? "bg-red-500/20 text-red-400 hover:bg-red-500/40" 
-                          : "opacity-0 group-hover:opacity-100 bg-black/20 hover:bg-red-500/20 text-stone-400 hover:text-red-400"
-                      }`}
-                      title={confirmDelete === s.file ? "Click again to confirm" : "Delete session"}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="absolute right-0 top-0 flex gap-1">
+                      <button
+                        onClick={(e) => handleResumeClick(e, s.file)}
+                        className="opacity-0 group-hover:opacity-100 bg-black/20 hover:bg-amber-500/20 text-stone-400 hover:text-amber-400 p-2 rounded-xl transition-all"
+                        title="Resume in terminal"
+                      >
+                        <Terminal className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => handleDeleteClick(e, s.file)}
+                        className={`p-2 rounded-xl transition-all ${
+                          confirmDelete === s.file 
+                            ? "bg-red-500/20 text-red-400 hover:bg-red-500/40" 
+                            : "opacity-0 group-hover:opacity-100 bg-black/20 hover:bg-red-500/20 text-stone-400 hover:text-red-400"
+                        }`}
+                        title={confirmDelete === s.file ? "Click again to confirm" : "Delete session"}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                   
                   <div className="flex items-center gap-2 text-xs font-mono text-stone-500 mb-4 relative z-10">
