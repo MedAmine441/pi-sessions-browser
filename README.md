@@ -1,4 +1,4 @@
-# 🌌 Pi Session Browser
+# 🌌 Pi Sessions Browser
 
 > **Note:** This application is designed exclusively for people who use the **Pi coding agent on Linux**.
 

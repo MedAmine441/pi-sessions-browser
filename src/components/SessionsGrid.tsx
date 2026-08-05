@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Folder, Trash2, ArrowLeft, RefreshCw, Terminal } from "lucide-react";
 import { SessionInfo } from "@/types";
@@ -51,10 +51,13 @@ export default function SessionsGrid({ date }: { date: string }) {
     }
 
     setConfirmDelete(null);
-    setSessions(prev => prev.filter(s => s.file !== file));
+    setSessions((prev) => prev.filter((s) => s.file !== file));
 
     try {
-      const res = await fetch(`/api/sessions?file=${encodeURIComponent(file)}`, { method: 'DELETE' });
+      const res = await fetch(
+        `/api/sessions?file=${encodeURIComponent(file)}`,
+        { method: "DELETE" },
+      );
       if (!res.ok) throw new Error("Failed to delete session");
       fetchSessions();
     } catch (err) {
@@ -70,7 +73,7 @@ export default function SessionsGrid({ date }: { date: string }) {
       const res = await fetch("/api/resume", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ file })
+        body: JSON.stringify({ file }),
       });
       if (!res.ok) throw new Error("Failed to resume session");
     } catch (err: any) {
@@ -91,11 +94,6 @@ export default function SessionsGrid({ date }: { date: string }) {
     fetchSessions(); // Refresh list to get new preview/counts
   };
 
-  const maxMsgs = useMemo(() => {
-    if (!sessions.length) return 1;
-    return Math.max(...sessions.map(s => s.messageCount), 1);
-  }, [sessions]);
-
   return (
     <div className="w-full h-full flex flex-col pointer-events-auto">
       {/* HUD Header overlay */}
@@ -106,7 +104,10 @@ export default function SessionsGrid({ date }: { date: string }) {
             onClick={() => router.push(`/?${searchParams.toString()}`)}
             className="group h-auto gap-2 px-4 py-2 bg-stone-900/60 hover:bg-stone-800/80 dark:hover:bg-stone-800/80 border-white/10 rounded-xl text-stone-300 hover:text-white backdrop-blur-md"
           >
-            <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" aria-hidden="true" />
+            <ArrowLeft
+              className="w-4 h-4 group-hover:-translate-x-1 transition-transform"
+              aria-hidden="true"
+            />
             Back
           </Button>
           <h1 className="text-3xl font-extrabold text-white flex items-center gap-3 drop-shadow-lg">
@@ -122,7 +123,10 @@ export default function SessionsGrid({ date }: { date: string }) {
             title="Refresh"
             aria-label="Refresh sessions"
           >
-            <RefreshCw className={`w-5 h-5 ${loading ? "animate-spin" : "group-hover:rotate-180 transition-transform duration-500"}`} aria-hidden="true" />
+            <RefreshCw
+              className={`w-5 h-5 ${loading ? "animate-spin" : "group-hover:rotate-180 transition-transform duration-500"}`}
+              aria-hidden="true"
+            />
           </Button>
         </div>
       </div>
@@ -130,11 +134,20 @@ export default function SessionsGrid({ date }: { date: string }) {
       <div className="flex-1 overflow-y-auto w-full custom-scrollbar">
         <div className="max-w-7xl mx-auto p-6 md:p-8">
           {loading ? (
-            <p className="text-center py-20 text-stone-500 font-mono animate-pulse" role="status">Loading sessions...</p>
+            <p
+              className="text-center py-20 text-stone-500 font-mono animate-pulse"
+              role="status"
+            >
+              Loading sessions...
+            </p>
           ) : sessions.length === 0 ? (
             <div className="text-center py-20">
-              <h2 className="text-xl font-bold text-stone-300 mb-2">No sessions found</h2>
-              <p className="text-stone-400 text-sm">Create a new session from the timeline.</p>
+              <h2 className="text-xl font-bold text-stone-300 mb-2">
+                No sessions found
+              </h2>
+              <p className="text-stone-400 text-sm">
+                Create a new session from the timeline.
+              </p>
             </div>
           ) : (
             <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -177,7 +190,11 @@ export default function SessionsGrid({ date }: { date: string }) {
                               ? "bg-red-500/20 text-red-400 hover:bg-red-500/40 dark:hover:bg-red-500/40 hover:text-red-300"
                               : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 bg-black/20 hover:bg-red-500/20 dark:hover:bg-red-500/20 text-stone-400 hover:text-red-400"
                           }`}
-                          title={confirmDelete === s.file ? "Click again to confirm" : "Delete session"}
+                          title={
+                            confirmDelete === s.file
+                              ? "Click again to confirm"
+                              : "Delete session"
+                          }
                           aria-label={
                             confirmDelete === s.file
                               ? `Confirm deletion of "${title}"`
@@ -196,23 +213,16 @@ export default function SessionsGrid({ date }: { date: string }) {
 
                     <div className="flex items-center justify-between mt-auto pt-4 border-t border-white/5 relative z-10 pointer-events-none">
                       <div className="text-[10px] uppercase tracking-wider text-stone-500 font-bold group-hover:text-amber-500/50 transition-colors">
-                        {new Date(s.updatedAt || s.createdAt).toLocaleTimeString()}
+                        {new Date(
+                          s.updatedAt || s.createdAt,
+                        ).toLocaleTimeString()}
                       </div>
 
                       {/* Activity visualizer */}
                       <div className="flex items-center gap-2">
                         <div className="text-xs font-mono font-bold text-amber-500/70">
-                          <span className="sr-only">Messages: </span>{s.messageCount}
-                        </div>
-                        <div className="w-8 h-8 rounded-full border border-white/10 flex items-center justify-center relative bg-black/20">
-                          <svg className="w-full h-full -rotate-90 transform absolute inset-0" aria-hidden="true">
-                            <circle cx="16" cy="16" r="14" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/5" />
-                            <circle
-                              cx="16" cy="16" r="14" fill="none" stroke="currentColor" strokeWidth="2"
-                              className="text-amber-500 transition-all duration-1000 ease-out"
-                              strokeDasharray={`${Math.max((s.messageCount / maxMsgs) * 88, 4)} 88`}
-                            />
-                          </svg>
+                          Messages:
+                          {s.messageCount}
                         </div>
                       </div>
                     </div>
@@ -225,10 +235,7 @@ export default function SessionsGrid({ date }: { date: string }) {
       </div>
 
       {openSessionFile && (
-        <ChatModal
-          file={openSessionFile}
-          onClose={closeSession}
-        />
+        <ChatModal file={openSessionFile} onClose={closeSession} />
       )}
     </div>
   );
