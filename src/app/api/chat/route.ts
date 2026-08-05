@@ -11,7 +11,10 @@ export async function POST(request: Request) {
     
     return NextResponse.json({ success: true }, { status: 202 });
   } catch (error: any) {
-    console.error(error);
+    // Pi failing (usage limits, a bad key, a crash) is an outcome to report,
+    // not a fault in this server, so it is logged as one line rather than a
+    // stack trace that reads like the app fell over.
+    console.warn(`Chat message not sent: ${error.message}`);
     return NextResponse.json({ error: error.message || "Failed to send chat message" }, { status: 500 });
   }
 }

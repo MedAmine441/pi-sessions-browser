@@ -481,6 +481,24 @@ export async function launchNewSession(targetCwd?: string) {
   child.unref();
 }
 
+/**
+ * Without a terminal to control, bash reports that job control is off. That is
+ * exactly what we asked for, so it stays out of what the user is shown.
+ */
+function detailOf(stderr: string) {
+  const detail = stderr
+    .split("\n")
+    .filter(
+      (line) =>
+        !/^bash: (cannot set terminal process group|no job control)/.test(
+          line.trim(),
+        ),
+    )
+    .join("\n")
+    .trim();
+  return detail ? ` ${detail}` : "";
+}
+
 export async function sendChatMessage(file: string, message: string) {
   // Pi has to run in the session's own folder, not wherever the app was started.
   const recorded = await readSessionCwd(file);
@@ -517,6 +535,10 @@ export async function sendChatMessage(file: string, message: string) {
         {
           stdio: ["ignore", "ignore", "pipe"],
           cwd,
+          // Its own process group: an interactive shell claims the terminal it
+          // is started from, and doing that from a background group suspends
+          // everything in it — the server included.
+          detached: true,
           env: {
             ...process.env,
             PI_FILE: file,
@@ -533,11 +555,7 @@ export async function sendChatMessage(file: string, message: string) {
       child.once("error", (error) => reject(error));
       child.once("close", (code) => {
         if (code !== 0 && code !== null) {
-          reject(
-            new Error(
-              `Message failed to send. Code ${code}. Error: ${stderr.trim()}`,
-            ),
-          );
+          reject(new Error(`Message failed to send. Code ${code}.${detailOf(stderr)}`));
         } else {
           done();
         }
