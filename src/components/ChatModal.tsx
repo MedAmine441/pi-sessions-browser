@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw, Cpu, GitFork, FileDown, Archive, ListTree, Search, Share2 } from "lucide-react";
-import { Message, PiState, SessionDetail, SessionModel } from "@/types";
+import { Message, MessagePart, PiState, SessionDetail, SessionModel } from "@/types";
 import { fetchJson, formatCost, formatTokens, localDateKey, messageOf } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,6 +40,73 @@ const LOCAL_COMMANDS = [
   { cmd: "/new", desc: "Start a new session in this folder" },
   { cmd: "/quit", desc: "Close this chat" },
 ] as const;
+
+type DeltaEvent = {
+  type: string;
+  contentIndex?: number;
+  delta?: string;
+  content?: string;
+  toolCall?: { id?: string; name?: string; arguments?: Record<string, unknown> };
+};
+
+/**
+ * Folds one RPC streaming delta into the parts of the live bubble. Indexed
+ * by contentIndex; message_end's file entry is authoritative and replaces
+ * all of this.
+ */
+function applyDelta(parts: MessagePart[], event: DeltaEvent): MessagePart[] {
+  const next = [...parts];
+  const at = event.contentIndex ?? next.length;
+  while (next.length <= at) next.push({ type: "text", text: "" });
+  const current = next[at];
+  switch (event.type) {
+    case "text_start":
+      next[at] = { type: "text", text: "" };
+      break;
+    case "text_delta":
+      next[at] = {
+        type: "text",
+        text: (current.type === "text" ? current.text : "") + (event.delta || ""),
+      };
+      break;
+    case "text_end":
+      if (typeof event.content === "string")
+        next[at] = { type: "text", text: event.content };
+      break;
+    case "thinking_start":
+      next[at] = { type: "thinking", thinking: "" };
+      break;
+    case "thinking_delta":
+      next[at] = {
+        type: "thinking",
+        thinking:
+          (current.type === "thinking" ? current.thinking : "") + (event.delta || ""),
+      };
+      break;
+    case "thinking_end":
+      if (typeof event.content === "string")
+        next[at] = { type: "thinking", thinking: event.content };
+      break;
+    case "toolcall_start":
+      next[at] = { type: "toolCall" };
+      break;
+    case "toolcall_end":
+      if (event.toolCall) next[at] = { type: "toolCall", ...event.toolCall };
+      break;
+    // toolcall_delta streams partial JSON arguments; the placeholder stands.
+  }
+  return next;
+}
+
+type AgentState = "idle" | "streaming" | "tool" | "compacting" | "retrying";
+
+/** What /api/rpc/events sends, mapped server-side from pi's event stream. */
+type RpcStreamPayload =
+  | { kind: "delta"; event: DeltaEvent }
+  | { kind: "message_start" }
+  | { kind: "message_end" }
+  | { kind: "status"; state: AgentState; toolName?: string }
+  | { kind: "closed" };
 
 /** What the edit box should hold: the message's first text part. */
 const editableTextOf = (m: Message) =>
@@ -349,6 +416,15 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef, chatInputRef);
 
+  const [agentState, setAgentState] = useState<AgentState>("idle");
+  const [activeTool, setActiveTool] = useState("");
+  /** Parts of the assistant message currently streaming; null when none. */
+  const [streamingParts, setStreamingParts] = useState<MessagePart[] | null>(null);
+  const agentStateRef = useRef(agentState);
+  useEffect(() => {
+    agentStateRef.current = agentState;
+  }, [agentState]);
+
   // Model catalog, for the context-window size of the session's model.
   const [piModels, setPiModels] = useState<PiState["models"] | null>(null);
 
@@ -412,6 +488,63 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
       .catch(() => {});
   }, []);
 
+  // Live agent activity from the session's RPC process: token deltas feed
+  // the streaming bubble, status events feed the activity line. The file
+  // watcher SSE stays the authority on persisted messages.
+  useEffect(() => {
+    const events = new EventSource(`/api/rpc/events?file=${encodeURIComponent(file)}`);
+    events.onmessage = (event) => {
+      let payload: RpcStreamPayload;
+      try {
+        payload = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (payload.kind === "status") {
+        setAgentState(payload.state);
+        setActiveTool(payload.state === "tool" ? payload.toolName || "tool" : "");
+        if (payload.state === "idle") setStreamingParts(null);
+      } else if (payload.kind === "message_start") {
+        setStreamingParts([]);
+      } else if (payload.kind === "message_end") {
+        setStreamingParts(null);
+      } else if (payload.kind === "delta") {
+        setStreamingParts((prev) => applyDelta(prev ?? [], payload.event));
+      } else if (payload.kind === "closed") {
+        setAgentState("idle");
+        setStreamingParts(null);
+      }
+    };
+    return () => events.close();
+  }, [file]);
+
+  // Closing the chat retires an idle pi process; a mid-run one is left to
+  // finish (or idle out) so closing the window never kills a running turn.
+  useEffect(
+    () => () => {
+      if (agentStateRef.current !== "idle") return;
+      fetch("/api/rpc/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file }),
+        keepalive: true,
+      }).catch(() => {});
+    },
+    [file],
+  );
+
+  const handleAbort = async () => {
+    try {
+      await fetchJson("/api/rpc/abort", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file }),
+      });
+    } catch (err) {
+      toast(messageOf(err));
+    }
+  };
+
   /**
    * Session-wide accounting from the entries themselves: dollar total across
    * every usage-bearing item, and the context size after the latest
@@ -454,6 +587,13 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [itemCount]);
+
+  // Deltas land many times a second; keep the live bubble in view without
+  // the smooth-scroll animation stacking up.
+  useEffect(() => {
+    if (streamingParts !== null)
+      messagesEndRef.current?.scrollIntoView({ block: "end" });
+  }, [streamingParts]);
 
   // Escape closes the find bar first, then the dialog (matching the
   // backdrop click); Ctrl/Cmd+F opens in-conversation find.
@@ -617,8 +757,8 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    // One pi process per session at a time: a second send against the same
-    // file would contend with the run already writing to it.
+    // isThinking guards only the legacy one-shot path; the RPC path queues
+    // a prompt sent mid-run as a follow-up instead of refusing it.
     if (isThinking || sessionGone || !chatInput.trim() || !sessionDetail) return;
 
     const message = chatInput.trim();
@@ -702,8 +842,22 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
       return;
     }
 
-    setIsThinking(true);
+    // RPC first: prompts stream and can be aborted or queued. The one-shot
+    // `pi -p` path stays as the fallback for a pi without RPC mode.
+    try {
+      const data = await fetchJson<{ queued: boolean }>("/api/rpc/prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file: sessionDetail.file, message }),
+      });
+      if (data.queued)
+        toast("Queued — pi picks it up when the current run settles.");
+      return;
+    } catch (err) {
+      console.warn("RPC prompt failed, falling back to one-shot pi:", err);
+    }
 
+    setIsThinking(true);
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -1157,15 +1311,61 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
                 ))
               )
             )}
+            {streamingParts !== null && (
+              <article
+                aria-live="polite"
+                className="p-5 rounded-2xl border backdrop-blur-md bg-orange-950/20 border-orange-500/30 mr-0 md:mr-12"
+              >
+                <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-orange-400">
+                  assistant
+                  <RefreshCw className="h-3 w-3 animate-spin" aria-hidden="true" />
+                </div>
+                <div className="text-stone-200 text-sm break-words leading-relaxed">
+                  {streamingParts.length > 0 ? (
+                    <AssistantParts
+                      m={{
+                        id: "__streaming__",
+                        role: "assistant",
+                        text: "",
+                        parts: streamingParts,
+                      }}
+                      hideToolCalls={hideToolCalls}
+                      resultFor={() => undefined}
+                    />
+                  ) : (
+                    <span className="animate-pulse text-stone-500">…</span>
+                  )}
+                </div>
+              </article>
+            )}
             <div ref={messagesEndRef} className="h-4" />
           </div>
         </section>
 
         {/* Chat Input */}
         <div className="p-4 md:p-6 bg-stone-900/80 backdrop-blur-xl border-t border-white/10 shrink-0">
-          {isThinking && (
+          {(isThinking || agentState !== "idle") && (
             <div className="mb-3 flex items-center justify-between text-xs text-amber-400 font-mono" role="status">
-              <span className="flex items-center gap-2"><RefreshCw className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> Pi is thinking...</span>
+              <span className="flex items-center gap-2">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                {agentState === "tool"
+                  ? `Running ${activeTool}…`
+                  : agentState === "compacting"
+                    ? "Compacting…"
+                    : agentState === "retrying"
+                      ? "Retrying after a transient error…"
+                      : "Pi is thinking..."}
+              </span>
+              {agentState !== "idle" && (
+                <Button
+                  variant="ghost"
+                  onClick={handleAbort}
+                  className="h-auto gap-1.5 rounded-lg bg-red-500/15 px-3 py-1 text-[11px] font-bold text-red-300 hover:bg-red-500/25 dark:hover:bg-red-500/25 hover:text-red-200"
+                  title="Abort the current run (/abort)"
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden="true" /> Stop
+                </Button>
+              )}
             </div>
           )}
           {isCompacting && (

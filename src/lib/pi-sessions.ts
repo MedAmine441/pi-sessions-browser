@@ -301,7 +301,7 @@ async function decodeDirName(name: string) {
 }
 
 /** Reads the cwd out of a session's header line without loading the whole file. */
-async function readSessionCwd(file: string) {
+export async function readSessionCwd(file: string) {
   let handle;
   try {
     handle = await fs.open(file, "r");

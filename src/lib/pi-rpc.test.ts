@@ -70,3 +70,46 @@ describe("pi RPC runner", () => {
     ).rejects.toThrow("exited before answering");
   });
 });
+
+describe("persistent RPC chat sessions", () => {
+  it("answers commands and broadcasts interleaved events to subscribers", async () => {
+    await useStub(`
+      process.stdout.write(JSON.stringify({ type: "agent_start" }) + "\\n");
+      process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Hi" } }) + "\\n");
+      process.stdout.write(JSON.stringify({ id: command.id, type: "response", command: command.type, success: true }) + "\\n");
+      process.stdout.write(JSON.stringify({ type: "agent_settled" }) + "\\n");
+    `);
+    const file = "/tmp/rpc-live.jsonl";
+    const events: string[] = [];
+    const unsubscribe = rpc.subscribeRpcEvents(file, (event) =>
+      events.push(event.type),
+    );
+
+    const session = await rpc.getRpcSession(file, true);
+    expect(session).not.toBeNull();
+    await session!.send({ type: "prompt", message: "hello" });
+    await vi.waitFor(() => expect(events).toContain("agent_settled"));
+    expect(events).toEqual(["agent_start", "message_update", "agent_settled"]);
+
+    // The same live session is reused, not respawned.
+    await expect(rpc.getRpcSession(file)).resolves.toBe(session);
+    unsubscribe();
+    rpc.closeRpcSession(file);
+  });
+
+  it("rejects pending commands and announces rpc_closed on shutdown", async () => {
+    await useStub(`/* never answers */`);
+    const file = "/tmp/rpc-doomed.jsonl";
+    const events: string[] = [];
+    rpc.subscribeRpcEvents(file, (event) => events.push(event.type));
+
+    const session = await rpc.getRpcSession(file, true);
+    const pending = session!.send({ type: "prompt", message: "hello" });
+    rpc.closeRpcSession(file);
+
+    await expect(pending).rejects.toThrow(/closed/i);
+    expect(events).toContain("rpc_closed");
+    // A closed session is not handed out again.
+    await expect(rpc.getRpcSession(file)).resolves.toBeNull();
+  });
+});
