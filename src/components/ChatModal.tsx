@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw, Cpu, GitFork, FileDown, Archive, ListTree, Share2 } from "lucide-react";
 import { Message, SessionDetail, SessionModel } from "@/types";
@@ -18,21 +18,99 @@ import {
 import { toast } from "@/components/ui/toast";
 import { ModelDialog } from "@/components/PiControls";
 import { SessionTreeDialog, ShareSessionDialog } from "@/components/SessionDialogs";
+import {
+  BashExecutionBlock,
+  ImagePart,
+  Markdown,
+  ThinkingBlock,
+  ToolCallBlock,
+} from "@/components/MessageParts";
 
-function MessageItem({ m, formatDate, onEdit }: { m: Message; formatDate: (d?: string) => string; onEdit?: (id: string, text: string) => void }) {
-  const isTool = m.role === "toolResult" || (m.toolName && (m.toolName.includes("bash") || m.toolName.includes("read")));
+/** What the edit box should hold: the message's first text part. */
+const editableTextOf = (m: Message) =>
+  m.parts?.find((part) => part.type === "text")?.text ?? m.text;
+
+/** Non-assistant content: plain text parts and images, no markdown. */
+function PlainParts({ m }: { m: Message }) {
+  if (!m.parts?.length)
+    return <>{m.text || "[no text content]"}</>;
+  return (
+    <>
+      {m.parts.map((part, i) =>
+        part.type === "text" ? (
+          <div key={i} className="whitespace-pre-wrap">{part.text}</div>
+        ) : part.type === "image" ? (
+          <ImagePart key={i} data={part.data} mimeType={part.mimeType} />
+        ) : null,
+      )}
+    </>
+  );
+}
+
+function AssistantParts({
+  m,
+  hideToolCalls,
+  resultFor,
+}: {
+  m: Message;
+  hideToolCalls: boolean;
+  resultFor: (callId?: string) => Message | undefined;
+}) {
+  if (!m.parts?.length)
+    return m.text ? <Markdown text={m.text} /> : <>[no text content]</>;
+  return (
+    <>
+      {m.parts.map((part, i) =>
+        part.type === "thinking" ? (
+          <ThinkingBlock key={i} thinking={part.thinking} />
+        ) : part.type === "text" ? (
+          <Markdown key={i} text={part.text} />
+        ) : part.type === "toolCall" ? (
+          <ToolCallBlock
+            key={i}
+            part={part}
+            result={resultFor(part.id)}
+            compact={hideToolCalls}
+          />
+        ) : part.type === "image" ? (
+          <ImagePart key={i} data={part.data} mimeType={part.mimeType} />
+        ) : null,
+      )}
+    </>
+  );
+}
+
+function MessageItem({
+  m,
+  formatDate,
+  onEdit,
+  hideToolCalls,
+  resultFor,
+}: {
+  m: Message;
+  formatDate: (d?: string) => string;
+  onEdit?: (id: string, text: string) => void;
+  hideToolCalls: boolean;
+  resultFor: (callId?: string) => Message | undefined;
+}) {
+  const isTool = m.role === "toolResult";
   const [isOpen, setIsOpen] = useState(!isTool);
   const [isEditing, setIsEditing] = useState(false);
-  const [editVal, setEditVal] = useState(m.text);
+  const [editVal, setEditVal] = useState(() => editableTextOf(m));
 
   const handleSave = () => {
-    if (editVal !== m.text && onEdit) {
+    if (editVal !== editableTextOf(m) && onEdit) {
       onEdit(m.id, editVal);
     }
     setIsEditing(false);
   };
 
-  const toolLabel = m.role === "toolResult" ? m.toolName || "Tool Result" : m.role;
+  const toolLabel =
+    m.role === "toolResult"
+      ? m.toolName || "Tool Result"
+      : m.role === "bashExecution"
+        ? "bash"
+        : m.role;
 
   return (
     <article
@@ -58,7 +136,7 @@ function MessageItem({ m, formatDate, onEdit }: { m: Message; formatDate: (d?: s
               <Button
                 variant="ghost"
                 size="icon-xs"
-                onClick={(e) => { e.stopPropagation(); setIsEditing(true); setEditVal(m.text); }}
+                onClick={(e) => { e.stopPropagation(); setIsEditing(true); setEditVal(editableTextOf(m)); }}
                 className="relative z-10 ml-1 opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 bg-black/20 hover:bg-black/40 dark:hover:bg-black/40 text-current hover:text-amber-200 rounded-md"
                 title="Edit message"
                 aria-label="Edit message"
@@ -121,11 +199,19 @@ function MessageItem({ m, formatDate, onEdit }: { m: Message; formatDate: (d?: s
             </Button>
           </div>
         </div>
+      ) : m.role === "bashExecution" ? (
+        <BashExecutionBlock m={m} />
       ) : (
-        <div className={`text-stone-200 text-sm whitespace-pre-wrap break-words leading-relaxed relative transition-all duration-300 ${
-          isTool && !isOpen ? "max-h-24 overflow-hidden" : ""
-        }`}>
-          {m.text || "[no text content]"}
+        <div
+          className={`text-stone-200 text-sm break-words leading-relaxed relative transition-all duration-300 ${
+            m.role === "assistant" ? "" : "whitespace-pre-wrap"
+          } ${isTool && !isOpen ? "max-h-24 overflow-hidden" : ""}`}
+        >
+          {m.role === "assistant" ? (
+            <AssistantParts m={m} hideToolCalls={hideToolCalls} resultFor={resultFor} />
+          ) : (
+            <PlainParts m={m} />
+          )}
           {isTool && !isOpen && (
             <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-stone-900/90 to-transparent pointer-events-none" aria-hidden="true" />
           )}
@@ -493,6 +579,41 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
     return isNaN(date.getTime()) ? "" : date.toLocaleString();
   };
 
+  /**
+   * Tool results render inline under the assistant tool call that produced
+   * them (matched by toolCallId); only orphaned results — the call side is
+   * missing or was compacted away — keep their own card.
+   */
+  const { resultsByCallId, pairedResultIds } = useMemo(() => {
+    const resultsByCallId = new Map<string, Message>();
+    const pairedResultIds = new Set<string>();
+    const items = sessionDetail?.items || [];
+    const callIds = new Set<string>();
+    for (const item of items)
+      for (const part of item.parts || [])
+        if (part.type === "toolCall" && part.id) callIds.add(part.id);
+    for (const item of items)
+      if (item.role === "toolResult" && item.toolCallId) {
+        resultsByCallId.set(item.toolCallId, item);
+        if (callIds.has(item.toolCallId)) pairedResultIds.add(item.id);
+      }
+    return { resultsByCallId, pairedResultIds };
+  }, [sessionDetail?.items]);
+
+  const resultFor = useCallback(
+    (callId?: string) => (callId ? resultsByCallId.get(callId) : undefined),
+    [resultsByCallId],
+  );
+
+  const visibleItems = useMemo(
+    () =>
+      (sessionDetail?.items || []).filter((m) => {
+        if (m.role !== "toolResult") return true;
+        return !pairedResultIds.has(m.id) && !hideToolCalls;
+      }),
+    [sessionDetail?.items, pairedResultIds, hideToolCalls],
+  );
+
   const sessionTitle = sessionDetail
     ? (sessionDetail.name || sessionDetail.preview || "Untitled Session")
     : "Initializing Session...";
@@ -672,7 +793,7 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
         <section aria-label="Conversation" className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar">
           <div className="flex flex-col gap-6 max-w-4xl mx-auto">
             {sessionDetail && (
-              sessionDetail.items.filter(m => hideToolCalls ? m.role !== "toolResult" : true).length === 0 ? (
+              visibleItems.length === 0 ? (
                 <div className="flex items-center justify-center h-full text-stone-500">
                   <div className="text-center space-y-3">
                     <Terminal className="w-12 h-12 mx-auto text-stone-700 opacity-50" aria-hidden="true" />
@@ -680,11 +801,16 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
                   </div>
                 </div>
               ) : (
-                sessionDetail.items
-                  .filter(m => hideToolCalls ? m.role !== "toolResult" : true)
-                  .map((m) => (
-                    <MessageItem key={m.id} m={m} formatDate={formatDate} onEdit={handleEditMessage} />
-                  ))
+                visibleItems.map((m) => (
+                  <MessageItem
+                    key={m.id}
+                    m={m}
+                    formatDate={formatDate}
+                    onEdit={handleEditMessage}
+                    hideToolCalls={hideToolCalls}
+                    resultFor={resultFor}
+                  />
+                ))
               )
             )}
             <div ref={messagesEndRef} className="h-4" />

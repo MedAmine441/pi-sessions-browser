@@ -143,3 +143,60 @@
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
 }
+/* ── Markdown rendering inside chat messages ─────────────────────────── */
+.chat-markdown > :first-child { margin-top: 0; }
+.chat-markdown > :last-child { margin-bottom: 0; }
+.chat-markdown p { margin: 0.5rem 0; }
+.chat-markdown h1, .chat-markdown h2, .chat-markdown h3,
+.chat-markdown h4, .chat-markdown h5, .chat-markdown h6 {
+  margin: 1rem 0 0.5rem;
+  font-weight: 700;
+  color: #fff;
+}
+.chat-markdown h1 { font-size: 1.15rem; }
+.chat-markdown h2 { font-size: 1.05rem; }
+.chat-markdown h3 { font-size: 1rem; }
+.chat-markdown ul { margin: 0.5rem 0; padding-left: 1.25rem; list-style: disc; }
+.chat-markdown ol { margin: 0.5rem 0; padding-left: 1.25rem; list-style: decimal; }
+.chat-markdown li { margin: 0.15rem 0; }
+.chat-markdown li > ul, .chat-markdown li > ol { margin: 0.15rem 0; }
+.chat-markdown a { color: #fcd34d; text-decoration: underline; text-underline-offset: 2px; }
+.chat-markdown code {
+  padding: 0.1em 0.35em;
+  border-radius: 0.375rem;
+  background: rgba(0, 0, 0, 0.4);
+  font-size: 0.85em;
+}
+.chat-markdown pre {
+  margin: 0.5rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.75rem;
+  background: rgba(0, 0, 0, 0.45);
+  overflow-x: auto;
+}
+.chat-markdown pre code { padding: 0; background: transparent; font-size: 0.8rem; }
+.chat-markdown blockquote {
+  margin: 0.5rem 0;
+  padding-left: 0.75rem;
+  border-left: 2px solid rgba(245, 158, 11, 0.4);
+  color: #a8a29e;
+}
+.chat-markdown table { margin: 0.5rem 0; border-collapse: collapse; font-size: 0.8rem; display: block; overflow-x: auto; }
+.chat-markdown th, .chat-markdown td {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.chat-markdown th { color: #fff; font-weight: 600; }
+.chat-markdown hr { margin: 1rem 0; border-color: rgba(255, 255, 255, 0.1); }
+.chat-markdown img { max-width: 100%; border-radius: 0.75rem; }
+
+/* highlight.js token palette, matched to the stone/amber scheme */
+.hljs-comment, .hljs-quote { color: #78716c; font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal { color: #fbbf24; }
+.hljs-string, .hljs-regexp, .hljs-addition { color: #6ee7b7; }
+.hljs-number, .hljs-symbol, .hljs-bullet { color: #fdba74; }
+.hljs-title, .hljs-section { color: #93c5fd; }
+.hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable { color: #fca5a5; }
+.hljs-type, .hljs-built_in, .hljs-class { color: #c4b5fd; }
+.hljs-meta, .hljs-deletion { color: #f87171; }
