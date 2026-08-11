@@ -177,7 +177,10 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ file: sessionDetail.file, messageId, newText })
       });
-      if (!res.ok) throw new Error("Failed to edit message");
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "Failed to edit message");
+      }
     } catch (e: any) {
       alert(e.message);
     }

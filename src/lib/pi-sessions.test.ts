@@ -222,6 +222,85 @@ describe("Pi session storage", () => {
     expect(listed.name).toBe("A new name");
   });
 
+  it("edits messages with string and array content, and reports misses", async () => {
+    const file = await writeSession("project/edit.jsonl", [
+      {
+        type: "session",
+        id: "edit",
+        cwd: "/work",
+        timestamp: "2026-01-01T10:00:00.000Z",
+      },
+      {
+        type: "message",
+        id: "plain",
+        timestamp: "2026-01-01T10:01:00.000Z",
+        message: { role: "user", content: "Original string" },
+      },
+      {
+        type: "message",
+        id: "rich",
+        timestamp: "2026-01-01T10:02:00.000Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Original text" }],
+        },
+      },
+      {
+        type: "message",
+        id: "textless",
+        timestamp: "2026-01-01T10:03:00.000Z",
+        message: { role: "user", content: [{ type: "image" }] },
+      },
+    ]);
+
+    await sessions.editMessage(file, "plain", "Edited string");
+    await sessions.editMessage(file, "rich", "Edited text");
+
+    const conversation = await sessions.getConversation(file);
+    expect(conversation.items.map((item) => item.text)).toEqual([
+      "Edited string",
+      "Edited text",
+      "[image]",
+    ]);
+
+    await expect(
+      sessions.editMessage(file, "missing", "x"),
+    ).rejects.toMatchObject({ status: 404 });
+    await expect(
+      sessions.editMessage(file, "textless", "x"),
+    ).rejects.toMatchObject({ status: 422 });
+  });
+
+  it("discards a session only while it holds no messages", async () => {
+    const empty = await writeSession("project/empty.jsonl", [
+      {
+        type: "session",
+        id: "empty",
+        cwd: "/work",
+        timestamp: "2026-01-01T10:00:00.000Z",
+      },
+    ]);
+    const used = await writeSession("project/used.jsonl", [
+      {
+        type: "session",
+        id: "used",
+        cwd: "/work",
+        timestamp: "2026-01-01T10:00:00.000Z",
+      },
+      {
+        type: "message",
+        id: "msg-1",
+        timestamp: "2026-01-01T10:01:00.000Z",
+        message: { role: "user", content: "Keep me" },
+      },
+    ]);
+
+    await expect(sessions.discardIfEmpty(used)).resolves.toBe(false);
+    await expect(sessions.discardIfEmpty(empty)).resolves.toBe(true);
+    await expect(fs.stat(empty)).rejects.toThrow();
+    await expect(fs.stat(used)).resolves.toBeTruthy();
+  });
+
   it("only accepts JSONL files contained in the configured session directory", async () => {
     const file = await writeSession("safe/session.jsonl", []);
     const outside = join(tmpdir(), "outside-session.jsonl");

@@ -615,11 +615,22 @@ export async function renameSession(file: string, newName: string) {
   await fs.appendFile(file, JSON.stringify(entry) + "\n", "utf-8");
 }
 
+/** An edit that could not land, with the HTTP status that describes why. */
+export class SessionEditError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
 export async function editMessage(
   file: string,
   messageId: string,
   newText: string,
 ) {
+  const before = await fs.stat(file);
   const content = await fs.readFile(file, "utf-8");
   const lines = content.split("\n");
   let modified = false;
@@ -634,25 +645,49 @@ export async function editMessage(
         parsed.id === messageId &&
         parsed.message
       ) {
-        // Find text content and edit it
-        if (Array.isArray(parsed.message.content)) {
-          const textItem = parsed.message.content.find(
-            (c: any) => c.type === "text",
-          );
-          if (textItem) {
-            textItem.text = newText;
-            lines[i] = JSON.stringify(parsed);
-            modified = true;
-            break;
-          }
+        const messageContent = parsed.message.content;
+        if (typeof messageContent === "string") {
+          parsed.message.content = newText;
+        } else {
+          const textItem = Array.isArray(messageContent)
+            ? messageContent.find((c: unknown) => (c as any)?.type === "text")
+            : null;
+          if (!textItem)
+            throw new SessionEditError(
+              "That message has no editable text.",
+              422,
+            );
+          textItem.text = newText;
         }
+        lines[i] = JSON.stringify(parsed);
+        modified = true;
+        break;
       }
-    } catch (e) {
-      // Ignore parse errors on individual lines
+    } catch (error) {
+      if (error instanceof SessionEditError) throw error;
+      /* A malformed line is skipped, matching how sessions are read. */
     }
   }
 
-  if (modified) {
-    await fs.writeFile(file, lines.join("\n"), "utf-8");
+  if (!modified)
+    throw new SessionEditError("No message with that id in this session.", 404);
+
+  // Pi may be appending to this session right now; a plain rewrite would
+  // silently drop every line it added after our read. Stage the edit in a
+  // temp file, re-check that the session is untouched, and rename into place.
+  const temp = `${file}.edit-${randomUUID().slice(0, 8)}.tmp`;
+  await fs.writeFile(temp, lines.join("\n"), "utf-8");
+  const after = await fs.stat(file).catch(() => null);
+  if (
+    !after ||
+    after.size !== before.size ||
+    after.mtimeMs !== before.mtimeMs
+  ) {
+    await fs.unlink(temp).catch(() => {});
+    throw new SessionEditError(
+      "The session changed while it was being edited. Try again.",
+      409,
+    );
   }
+  await fs.rename(temp, file);
 }
