@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { localDateKey } from "./utils";
 
 const sessionRoot = resolve(
   process.env.PI_SESSION_DIR || `${homedir()}/.pi/agent/sessions`,
@@ -301,6 +302,17 @@ async function collectFiles(location?: string) {
   return files;
 }
 
+/** Session filenames start with a UTC stamp: 2026-08-09T19-28-48-916Z_uuid.jsonl */
+export function timestampFromFilename(file: string): Date | null {
+  const match = basename(file).match(
+    /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z/,
+  );
+  if (!match) return null;
+  const [, date, h, m, s, ms] = match;
+  const parsed = new Date(`${date}T${h}:${m}:${s}.${ms}Z`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 export async function listDates(location?: string) {
   const all = await collectFiles(location);
   const used = await Promise.all(all.map(hasMessages));
@@ -308,52 +320,32 @@ export async function listDates(location?: string) {
 
   const dates: Record<string, number> = {};
   for (const file of files) {
-    const filename = basename(file);
-    const match = filename.match(
-      /^(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)/,
-    );
-    if (match) {
-      try {
-        const datePart = match[1].substring(0, 10);
-        const timePart = match[1]
-          .substring(10)
-          .replace(/-/g, ":")
-          .replace(/:(\d{3}Z)$/, ".$1");
-        const iso = datePart + timePart;
-        const dateStr = new Date(iso).toLocaleDateString();
-        dates[dateStr] = (dates[dateStr] || 0) + 1;
-      } catch (e) {}
-    }
+    const timestamp = timestampFromFilename(file);
+    if (!timestamp) continue;
+    const key = localDateKey(timestamp);
+    dates[key] = (dates[key] || 0) + 1;
   }
 
+  // The canonical YYYY-MM-DD keys sort chronologically as plain strings.
   return Object.entries(dates)
     .map(([date, count]) => ({ date, count }))
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    .sort((a, b) => b.date.localeCompare(a.date));
 }
 
 export async function listSessions(targetDate?: string, location?: string) {
   let files = await collectFiles(location);
 
   if (targetDate) {
+    // Links from before the canonical key carried locale-formatted dates;
+    // parse those rather than turning old bookmarks into empty pages.
+    const wanted = /^\d{4}-\d{2}-\d{2}$/.test(targetDate)
+      ? targetDate
+      : Number.isNaN(Date.parse(targetDate))
+        ? null
+        : localDateKey(new Date(targetDate));
     files = files.filter((file) => {
-      const filename = basename(file);
-      const match = filename.match(
-        /^(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)/,
-      );
-      if (match) {
-        try {
-          const datePart = match[1].substring(0, 10);
-          const timePart = match[1]
-            .substring(10)
-            .replace(/-/g, ":")
-            .replace(/:(\d{3}Z)$/, ".$1");
-          const iso = datePart + timePart;
-          return new Date(iso).toLocaleDateString() === targetDate;
-        } catch (e) {
-          return false;
-        }
-      }
-      return false;
+      const timestamp = timestampFromFilename(file);
+      return timestamp !== null && localDateKey(timestamp) === wanted;
     });
   }
 

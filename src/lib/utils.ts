@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { format } from "date-fns"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -20,30 +21,21 @@ export function shortenPath(path: string) {
   return path.replace(/^\/(?:home|Users)\//, "") || path;
 }
 
-export function getOrdinalSuffix(i: number) {
-  const j = i % 10,
-        k = i % 100;
-  if (j == 1 && k != 11) {
-      return i + "st";
-  }
-  if (j == 2 && k != 12) {
-      return i + "nd";
-  }
-  if (j == 3 && k != 13) {
-      return i + "rd";
-  }
-  return i + "th";
+/**
+ * The canonical date key used in URLs, grouping, and filtering: the local
+ * calendar day as YYYY-MM-DD. Locale-formatted dates only appear at render
+ * time, via formatReadableDate.
+ */
+export function localDateKey(date: Date) {
+  return format(date, "yyyy-MM-dd");
 }
 
+/** Renders a canonical YYYY-MM-DD key (or any ISO timestamp) for display. */
 export function formatReadableDate(dateString: string) {
-  const date = new Date(dateString);
+  // A bare key would otherwise parse as UTC midnight and show the wrong day.
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(dateString)
+    ? new Date(`${dateString}T00:00:00`)
+    : new Date(dateString);
   if (isNaN(date.getTime())) return dateString;
-  
-  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-  
-  const month = months[date.getMonth()];
-  const day = getOrdinalSuffix(date.getDate());
-  const year = date.getFullYear();
-  
-  return `${month} ${day}, ${year}`;
+  return format(date, "PPP");
 }

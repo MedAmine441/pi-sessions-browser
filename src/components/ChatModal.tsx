@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
 import { Message, SessionDetail } from "@/types";
+import { localDateKey } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 function MessageItem({ m, formatDate, onEdit }: { m: Message; formatDate: (d: string) => string; onEdit?: (id: string, text: string) => void }) {
@@ -240,7 +241,7 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
 
         close();
         if (data.file) {
-          const today = new Date().toLocaleDateString();
+          const today = localDateKey(new Date());
           // Keep search params like location and filters intact
           const params = new URLSearchParams(window.location.search);
           if (sessionDetail.cwd) params.set("location", sessionDetail.cwd);

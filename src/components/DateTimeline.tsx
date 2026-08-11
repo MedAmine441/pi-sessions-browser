@@ -10,7 +10,7 @@ import {
   Folder,
   Layers,
 } from "lucide-react";
-import { formatReadableDate, shortenPath } from "@/lib/utils";
+import { formatReadableDate, localDateKey, shortenPath } from "@/lib/utils";
 import FolderPicker from "./FolderPicker";
 import { usePathname } from "next/navigation";
 import { format } from "date-fns";
@@ -39,8 +39,9 @@ export default function DateTimeline() {
   const pathname = usePathname();
   const location = searchParams.get("location") || "";
   const fromDate = searchParams.get("fromDate") || "";
-  const toDate =
-    searchParams.get("toDate") || new Date().toISOString().split("T")[0];
+  // The local day, not toISOString()'s UTC day, which hides today's sessions
+  // from local midnight until UTC midnight in any timezone ahead of UTC.
+  const toDate = searchParams.get("toDate") || localDateKey(new Date());
 
   const updateFilters = (updates: { fromDate?: string; toDate?: string }) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -63,33 +64,11 @@ export default function DateTimeline() {
     fetch(url)
       .then((r) => r.json())
       .then((d) => {
-        let filtered = Array.isArray(d) ? d : [];
-        if (fromDate) {
-          const [y, m, day] = fromDate.split("-");
-          const fromTime = new Date(
-            Number(y),
-            Number(m) - 1,
-            Number(day),
-          ).getTime();
-          filtered = filtered.filter(
-            (item) => new Date(item.date).getTime() >= fromTime,
-          );
-        }
-        if (toDate) {
-          const [y, m, day] = toDate.split("-");
-          const toTime = new Date(
-            Number(y),
-            Number(m) - 1,
-            Number(day),
-            23,
-            59,
-            59,
-            999,
-          ).getTime();
-          filtered = filtered.filter(
-            (item) => new Date(item.date).getTime() <= toTime,
-          );
-        }
+        // Everything is a canonical YYYY-MM-DD key, so range checks are
+        // plain string comparisons — no locale-dependent re-parsing.
+        let filtered: DateItem[] = Array.isArray(d) ? d : [];
+        if (fromDate) filtered = filtered.filter((item) => item.date >= fromDate);
+        if (toDate) filtered = filtered.filter((item) => item.date <= toDate);
         setDates(filtered);
         setLoading(false);
       })
@@ -117,7 +96,7 @@ export default function DateTimeline() {
         const params = new URLSearchParams(searchParams.toString());
         params.set("location", cwd);
         params.set("session", data.file);
-        const today = new Date().toLocaleDateString();
+        const today = localDateKey(new Date());
         router.push(`/${encodeURIComponent(today)}?${params.toString()}`);
       }
     } catch (err: any) {

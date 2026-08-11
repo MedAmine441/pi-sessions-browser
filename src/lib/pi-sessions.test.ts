@@ -151,6 +151,45 @@ describe("Pi session storage", () => {
     });
   });
 
+  it("parses the UTC timestamp out of session filenames", () => {
+    expect(
+      sessions
+        .timestampFromFilename("/x/2026-08-09T19-28-48-916Z_uuid.jsonl")
+        ?.toISOString(),
+    ).toBe("2026-08-09T19:28:48.916Z");
+    expect(sessions.timestampFromFilename("/x/older.jsonl")).toBeNull();
+  });
+
+  it("groups and filters sessions by a canonical YYYY-MM-DD key", async () => {
+    const entries = [
+      {
+        type: "session",
+        id: "dated",
+        cwd: "/work",
+        timestamp: "2026-03-05T12:00:00.000Z",
+      },
+      {
+        type: "message",
+        id: "msg-1",
+        timestamp: "2026-03-05T12:01:00.000Z",
+        message: { role: "user", content: "Hi" },
+      },
+    ];
+    await writeSession("project/2026-03-05T12-00-00-000Z_abc.jsonl", entries);
+    await writeSession("project/2026-03-06T12-00-00-000Z_def.jsonl", entries);
+
+    // The two stamps are a day apart, so they land on distinct local days in
+    // every timezone even though the exact key depends on the zone.
+    const dates = await sessions.listDates();
+    expect(dates.every((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date))).toBe(true);
+    expect(dates.map((d) => d.count)).toEqual([1, 1]);
+    expect(dates[0].date > dates[1].date).toBe(true);
+
+    const listed = await sessions.listSessions(dates[1].date);
+    expect(listed).toHaveLength(1);
+    expect(listed[0].file).toContain("2026-03-05T12-00-00-000Z_abc.jsonl");
+  });
+
   it("renames sessions in Pi's own session_info format", async () => {
     const file = await writeSession("project/renamed.jsonl", [
       {
