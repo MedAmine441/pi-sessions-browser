@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CornerLeftUp, Folder, FolderOpen, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { fetchJson, messageOf, shortenPath } from "@/lib/utils";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 
 type Listing = {
   path: string;
@@ -19,6 +20,8 @@ export default function FolderPicker({
   onSelect: (path: string) => void;
 }) {
   const [listing, setListing] = useState<Listing | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef);
   // Empty means "wherever the server starts you", which is the home folder.
   const [path, setPath] = useState("");
   const [error, setError] = useState("");
@@ -70,6 +73,8 @@ export default function FolderPicker({
       />
 
       <div
+        ref={panelRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label="Choose a folder for the new session"

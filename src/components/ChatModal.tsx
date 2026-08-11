@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
 import { ModelDialog } from "@/components/PiControls";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 import { SessionTreeDialog, ShareSessionDialog } from "@/components/SessionDialogs";
 import {
   BashExecutionBlock,
@@ -345,6 +346,8 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
   const [cmdDismissed, setCmdDismissed] = useState(false);
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const chatFormRef = useRef<HTMLFormElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef, chatInputRef);
 
   // Model catalog, for the context-window size of the session's model.
   const [piModels, setPiModels] = useState<PiState["models"] | null>(null);
@@ -875,6 +878,8 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
       />
 
       <div
+        ref={panelRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={`Session: ${sessionTitle}`}
