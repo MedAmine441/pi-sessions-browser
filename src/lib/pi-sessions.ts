@@ -10,7 +10,7 @@ const sessionRoot = resolve(
 );
 const terminal = process.env.PI_TERMINAL || "x-terminal-emulator";
 const piCommand = process.env.PI_COMMAND || "pi";
-const maxSessionBytes = Number(
+export const maxSessionBytes = Number(
   process.env.PI_SESSION_BROWSER_MAX_BYTES || 100 * 1024 * 1024,
 );
 let canonicalRoot: string;
@@ -71,13 +71,7 @@ export async function safeSessionPath(candidate: string | null) {
   return real;
 }
 
-async function load(file: string) {
-  const stat = await fs.stat(file);
-  if (stat.size > maxSessionBytes)
-    throw new Error(
-      `Session is larger than the ${Math.round(maxSessionBytes / 1024 / 1024)} MB safety limit.`,
-    );
-  const raw = await fs.readFile(file, "utf8");
+export function parseEntries(raw: string) {
   const entries = [];
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
@@ -87,19 +81,37 @@ async function load(file: string) {
       /* A partially-written final JSONL line is safe to ignore. */
     }
   }
-  return { stat, entries };
+  return entries;
+}
+
+async function load(file: string) {
+  const stat = await fs.stat(file);
+  if (stat.size > maxSessionBytes)
+    throw new Error(
+      `Session is larger than the ${Math.round(maxSessionBytes / 1024 / 1024)} MB safety limit.`,
+    );
+  const raw = await fs.readFile(file, "utf8");
+  return { stat, entries: parseEntries(raw) };
 }
 
 /**
- * Pi names sessions with session_info entries; the latest one wins and an
- * empty name clears the title. Earlier versions of this browser wrote "name"
+ * The name update an entry carries: a string, null for an explicit clear,
+ * undefined when the entry is not name-bearing. Pi names sessions with
+ * session_info entries; earlier versions of this browser wrote "name"
  * entries instead, so those still count.
  */
+export function nameFromEntry(entry: any): string | null | undefined {
+  if (entry.type !== "session_info" && entry.type !== "name") return undefined;
+  return entry.name?.trim() || null;
+}
+
+/** The latest name-bearing entry wins; an empty name clears the title. */
 function nameFrom(entries: any[]) {
-  const entry = entries.findLast(
-    (entry) => entry.type === "session_info" || entry.type === "name",
-  );
-  return entry?.name?.trim() || null;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const name = nameFromEntry(entries[i]);
+    if (name !== undefined) return name;
+  }
+  return null;
 }
 
 function summarize(file: string, stat: any, entries: any[]) {
@@ -368,37 +380,45 @@ export async function listSessions(targetDate?: string, location?: string) {
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 }
 
-export async function getConversation(file: string) {
-  const { entries } = await load(file);
+/** Shapes one raw session entry into a renderable conversation item. */
+export function conversationItemFromEntry(entry: any) {
+  if (entry.type === "message") {
+    const message = entry.message || {};
+    if (message.role === "custom" && !message.display) return null;
+    return {
+      id: entry.id,
+      timestamp: entry.timestamp || message.timestamp,
+      role: message.role || "message",
+      text: textFrom(message.content),
+      toolName: message.toolName,
+    };
+  }
+  if (entry.type === "compaction") {
+    return {
+      id: entry.id,
+      timestamp: entry.timestamp,
+      role: "summary",
+      text: entry.summary || "Conversation compacted",
+    };
+  }
+  if (entry.type === "branch_summary") {
+    return {
+      id: entry.id,
+      timestamp: entry.timestamp,
+      role: "summary",
+      text: entry.summary || "Branch summary",
+    };
+  }
+  return null;
+}
+
+export function conversationFromEntries(file: string, entries: any[]) {
   const header = entries.find((entry) => entry.type === "session") || {};
   const name = nameFrom(entries);
   const items = [];
   for (const entry of entries) {
-    if (entry.type === "message") {
-      const message = entry.message || {};
-      if (message.role === "custom" && !message.display) continue;
-      items.push({
-        id: entry.id,
-        timestamp: entry.timestamp || message.timestamp,
-        role: message.role || "message",
-        text: textFrom(message.content),
-        toolName: message.toolName,
-      });
-    } else if (entry.type === "compaction") {
-      items.push({
-        id: entry.id,
-        timestamp: entry.timestamp,
-        role: "summary",
-        text: entry.summary || "Conversation compacted",
-      });
-    } else if (entry.type === "branch_summary") {
-      items.push({
-        id: entry.id,
-        timestamp: entry.timestamp,
-        role: "summary",
-        text: entry.summary || "Branch summary",
-      });
-    }
+    const item = conversationItemFromEntry(entry);
+    if (item) items.push(item);
   }
   const firstUserMsg = entries.find(
     (e) => e.type === "message" && e.message?.role === "user",
@@ -417,6 +437,11 @@ export async function getConversation(file: string) {
     items,
     preview,
   };
+}
+
+export async function getConversation(file: string) {
+  const { entries } = await load(file);
+  return conversationFromEntries(file, entries);
 }
 
 export async function launchSession(file: string) {
@@ -516,55 +541,43 @@ export async function sendChatMessage(file: string, message: string) {
       : homedir();
 
   return new Promise<void>((done, reject) => {
-    const isWin = process.platform === "win32";
-    if (isWin) {
-      const child = spawn(piCommand, ["--session", file, "-p", message], {
-        stdio: "ignore",
+    // Use an interactive shell (-ic) to ensure aliases (like 'pi') are expanded.
+    // Pass file and message as environment variables to prevent shell injection;
+    // PI_COMMAND itself is interpolated, which is acceptable only because it is
+    // an operator-set env var — never route user input through it.
+    // (This app is Linux-only; a Windows branch that passed the raw message to
+    // cmd.exe via shell:true used to live here and must not come back.)
+    const child = spawn(
+      "bash",
+      ["-ic", `${piCommand} --session "$PI_FILE" -p "$PI_MESSAGE"`],
+      {
+        stdio: ["ignore", "ignore", "pipe"],
         cwd,
-        env: process.env,
-        shell: true,
-      });
-      child.once("error", (error) => reject(error));
-      child.once("close", (code) => {
-        if (code !== 0 && code !== null)
-          reject(new Error(`Process exited with code ${code}`));
-        else done();
-      });
-    } else {
-      // Use an interactive shell (-ic) to ensure aliases (like 'pi') are expanded.
-      // Pass file and message as environment variables to prevent shell injection.
-      const child = spawn(
-        "bash",
-        ["-ic", `${piCommand} --session "$PI_FILE" -p "$PI_MESSAGE"`],
-        {
-          stdio: ["ignore", "ignore", "pipe"],
-          cwd,
-          // Its own process group: an interactive shell claims the terminal it
-          // is started from, and doing that from a background group suspends
-          // everything in it — the server included.
-          detached: true,
-          env: {
-            ...process.env,
-            PI_FILE: file,
-            PI_MESSAGE: message,
-          },
+        // Its own process group: an interactive shell claims the terminal it
+        // is started from, and doing that from a background group suspends
+        // everything in it — the server included.
+        detached: true,
+        env: {
+          ...process.env,
+          PI_FILE: file,
+          PI_MESSAGE: message,
         },
-      );
+      },
+    );
 
-      let stderr = "";
-      if (child.stderr) {
-        child.stderr.on("data", (data) => (stderr += data.toString()));
-      }
-
-      child.once("error", (error) => reject(error));
-      child.once("close", (code) => {
-        if (code !== 0 && code !== null) {
-          reject(new Error(`Message failed to send. Code ${code}.${detailOf(stderr)}`));
-        } else {
-          done();
-        }
-      });
+    let stderr = "";
+    if (child.stderr) {
+      child.stderr.on("data", (data) => (stderr += data.toString()));
     }
+
+    child.once("error", (error) => reject(error));
+    child.once("close", (code) => {
+      if (code !== 0 && code !== null) {
+        reject(new Error(`Message failed to send. Code ${code}.${detailOf(stderr)}`));
+      } else {
+        done();
+      }
+    });
   });
 }
 

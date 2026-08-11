@@ -82,6 +82,14 @@ function MessageItem({ m, formatDate, onEdit }: { m: Message; formatDate: (d: st
           <textarea
             value={editVal}
             onChange={(e) => setEditVal(e.target.value)}
+            onKeyDown={(e) => {
+              // Cancel the edit only — without stopPropagation the document
+              // listener would close the whole modal on the same keypress.
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                setIsEditing(false);
+              }
+            }}
             aria-label="Message text"
             className="w-full bg-black/40 border border-amber-500/50 rounded-xl px-4 py-3 text-stone-200 focus:outline-none focus:ring-1 focus:ring-amber-500/50 shadow-inner custom-scrollbar min-h-[100px]"
           />
@@ -115,8 +123,15 @@ function MessageItem({ m, formatDate, onEdit }: { m: Message; formatDate: (d: st
   );
 }
 
+/** What /api/stream sends: one snapshot, then only what changed. */
+type StreamPayload =
+  | { kind: "snapshot"; detail: SessionDetail }
+  | { kind: "append"; items: Message[]; name?: string | null }
+  | { kind: "gone" };
+
 export default function ChatModal({ file, onClose }: { file: string; onClose: (discardIfEmpty?: boolean) => void }) {
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null);
+  const [sessionGone, setSessionGone] = useState(false);
   const [hideToolCalls, setHideToolCalls] = useState(true);
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameInput, setRenameInput] = useState("");
@@ -141,12 +156,38 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
   };
 
   useEffect(() => {
-    let eventSource = new EventSource(`/api/stream?file=${encodeURIComponent(file)}`);
+    const eventSource = new EventSource(`/api/stream?file=${encodeURIComponent(file)}`);
 
     eventSource.onmessage = (event) => {
       try {
-        const detail = JSON.parse(event.data);
-        setSessionDetail(detail);
+        const payload: StreamPayload = JSON.parse(event.data);
+        if (payload.kind === "snapshot") {
+          setSessionGone(false);
+          setSessionDetail(payload.detail);
+        } else if (payload.kind === "append") {
+          setSessionDetail((prev) => {
+            if (!prev) return prev;
+            const items = [...prev.items];
+            const indexById = new Map(items.map((item, i) => [item.id, i]));
+            for (const item of payload.items) {
+              const at = indexById.get(item.id);
+              if (at === undefined) {
+                indexById.set(item.id, items.length);
+                items.push(item);
+              } else {
+                items[at] = item;
+              }
+            }
+            return {
+              ...prev,
+              items,
+              ...(payload.name !== undefined ? { name: payload.name } : {}),
+            };
+          });
+        } else if (payload.kind === "gone") {
+          // Deleted, renamed away, or too large to stream — nothing more will come.
+          setSessionGone(true);
+        }
       } catch (e) {
         console.error("Failed to parse SSE data", e);
       }
@@ -221,7 +262,9 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim() || !sessionDetail) return;
+    // One pi process per session at a time: a second send against the same
+    // file would contend with the run already writing to it.
+    if (isThinking || sessionGone || !chatInput.trim() || !sessionDetail) return;
 
     const message = chatInput.trim();
     setChatInput("");
@@ -317,7 +360,11 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
                   onChange={(e) => setRenameInput(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleRenameSubmit();
-                    if (e.key === "Escape") setIsRenaming(false);
+                    if (e.key === "Escape") {
+                      // Cancel the rename without also closing the modal.
+                      e.stopPropagation();
+                      setIsRenaming(false);
+                    }
                   }}
                   onBlur={handleRenameSubmit}
                   aria-label="Session name"
@@ -412,18 +459,24 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
               <span className="flex items-center gap-2"><RefreshCw className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> Pi is thinking...</span>
             </div>
           )}
+          {sessionGone && (
+            <div className="mb-3 text-xs text-red-400 font-mono" role="status">
+              This session&apos;s file is gone or can no longer be streamed.
+            </div>
+          )}
           <form onSubmit={handleSendMessage} className="flex gap-3 relative">
             <input
               type="text"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
+              disabled={sessionGone}
               placeholder="Send a message to this session..."
               aria-label="Message to send to this session"
-              className="flex-1 bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-stone-200 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 shadow-inner placeholder-stone-500 transition-all"
+              className="flex-1 bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-stone-200 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 shadow-inner placeholder-stone-500 transition-all disabled:opacity-50"
             />
             <Button
               type="submit"
-              disabled={!chatInput.trim()}
+              disabled={!chatInput.trim() || isThinking || sessionGone}
               className="h-auto px-6 bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-bold shadow-lg"
             >
               Send
