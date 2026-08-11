@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-} from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 export interface LiquidOptions {
   /** Resolution of the simulation grid. */
@@ -310,17 +304,6 @@ interface DoubleTarget {
   read: Target;
   write: Target;
   swap: () => void;
-}
-
-export function supportsHtmlInCanvas(): boolean {
-  if (typeof document === "undefined") return false;
-  const probe = document.createElement("canvas") as PaintableCanvas;
-  const ctx = probe.getContext("2d") as ElementImageContext | null;
-  return Boolean(
-    ctx &&
-    typeof ctx.drawElementImage === "function" &&
-    typeof probe.requestPaint === "function",
-  );
 }
 
 export function createLiquid(
@@ -915,8 +898,6 @@ export interface LiquidProps extends LiquidOptions {
   style?: React.CSSProperties;
 }
 
-const emptySubscribe = () => () => {};
-
 export function Liquid({
   children,
   className,
@@ -928,14 +909,6 @@ export function Liquid({
   const outputRef = useRef<HTMLCanvasElement>(null);
   const instanceRef = useRef<LiquidInstance | null>(null);
   const [initialOptions] = useState(options);
-  const [failed, setFailed] = useState(false);
-
-  const supported = useSyncExternalStore(
-    emptySubscribe,
-    supportsHtmlInCanvas,
-    () => false,
-  );
-  const native = false;
 
   useEffect(() => {
     const source = sourceRef.current;
@@ -946,22 +919,11 @@ export function Liquid({
       { source, content, output },
       initialOptions,
     );
-    if (native && !instanceRef.current) setFailed(true);
-    
-    let observer: MutationObserver | null = null;
-    if (native && content) {
-      observer = new MutationObserver(() => {
-        instanceRef.current?.resize();
-      });
-      observer.observe(content, { childList: true, subtree: true, attributes: true });
-    }
-
     return () => {
-      observer?.disconnect();
       instanceRef.current?.destroy();
       instanceRef.current = null;
     };
-  }, [initialOptions, native]);
+  }, [initialOptions]);
 
   useEffect(() => {
     instanceRef.current?.setOptions(options);
@@ -969,46 +931,29 @@ export function Liquid({
 
   return (
     <div className={className} style={{ position: "relative", ...style }}>
+      {/* The hidden canvas feeds the html-in-canvas capture experiment, which
+          createLiquid detects at runtime; browsers without it just render the
+          children as a plain DOM overlay below. */}
       <canvas
         ref={sourceRef}
         // @ts-expect-error experimental html-in-canvas attribute
         layoutsubtree="true"
         suppressHydrationWarning
-        style={
-          native
-            ? { position: "absolute", inset: 0, width: "100%", height: "100%" }
-            : { display: "none" }
-        }
+        style={{ display: "none" }}
+      />
+      <div
+        ref={contentRef}
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 10,
+          width: "100%",
+          height: "100%",
+          overflow: "auto",
+        }}
       >
-        {native ? (
-          <div
-            ref={contentRef}
-            style={{
-              position: "relative",
-              width: "100%",
-              height: "100%",
-              overflow: "auto",
-            }}
-          >
-            {children}
-          </div>
-        ) : null}
-      </canvas>
-      {!native ? (
-        <div
-          ref={contentRef}
-          style={{
-            position: "absolute",
-            inset: 0,
-            zIndex: 10,
-            width: "100%",
-            height: "100%",
-            overflow: "auto",
-          }}
-        >
-          {children}
-        </div>
-      ) : null}
+        {children}
+      </div>
       <canvas
         ref={outputRef}
         aria-hidden

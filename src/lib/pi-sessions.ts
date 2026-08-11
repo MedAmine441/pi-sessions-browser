@@ -10,9 +10,13 @@ const sessionRoot = resolve(
 );
 const terminal = process.env.PI_TERMINAL || "x-terminal-emulator";
 const piCommand = process.env.PI_COMMAND || "pi";
-export const maxSessionBytes = Number(
-  process.env.PI_SESSION_BROWSER_MAX_BYTES || 100 * 1024 * 1024,
-);
+const configuredMaxBytes = Number(process.env.PI_SESSION_BROWSER_MAX_BYTES);
+// A garbage value would make every size comparison false and silently turn
+// the safety limit off, so only a real positive number counts.
+export const maxSessionBytes =
+  Number.isFinite(configuredMaxBytes) && configuredMaxBytes > 0
+    ? configuredMaxBytes
+    : 100 * 1024 * 1024;
 let canonicalRoot: string;
 
 function textFrom(content: any): string {
@@ -187,16 +191,95 @@ async function readSessionCwd(file: string) {
 }
 
 /**
+ * Session files are append-only, so anything derived from one is valid for as
+ * long as its (size, mtime) pair holds. These caches are what makes browsing
+ * tens of thousands of sessions bearable: without them every timeline load
+ * re-reads every session on disk.
+ */
+type Cached<T> = { size: number; mtimeMs: number; value: T };
+const hasMessagesCache = new Map<string, Cached<boolean>>();
+const summaryCache = new Map<string, Cached<ReturnType<typeof summarize>>>();
+
+function cacheGet<T>(
+  cache: Map<string, Cached<T>>,
+  file: string,
+  stat: { size: number; mtimeMs: number },
+) {
+  const cached = cache.get(file);
+  return cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs
+    ? cached
+    : undefined;
+}
+
+function dropFromCaches(file: string) {
+  hasMessagesCache.delete(file);
+  summaryCache.delete(file);
+}
+
+/** Promise.all with a cap on simultaneously open files. */
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      while (next < items.length) {
+        const index = next++;
+        results[index] = await fn(items[index]);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+// Anchored to a line start: the bare substring also matches inside any string
+// field, such as a session named '…"type":"message"…'.
+const MESSAGE_LINE = /^\{"type":"message"/m;
+// A used session's first message appears early, so a bounded read answers
+// almost every file without loading it whole.
+const PROBE_BYTES = 64 * 1024;
+
+async function probeForMessages(file: string, size: number) {
+  // Nothing that large can be an untouched session, and reading it would hurt.
+  if (size > maxSessionBytes) return true;
+  let handle;
+  try {
+    handle = await fs.open(file, "r");
+    const { buffer, bytesRead } = await handle.read({
+      buffer: Buffer.alloc(Math.min(size, PROBE_BYTES)),
+      position: 0,
+    });
+    if (MESSAGE_LINE.test(buffer.subarray(0, bytesRead).toString("utf8")))
+      return true;
+    if (size <= PROBE_BYTES) return false;
+  } finally {
+    await handle?.close();
+  }
+  const raw = await fs.readFile(file, "utf8");
+  return MESSAGE_LINE.test(raw);
+}
+
+/**
  * A session Pi has never written a message to holds nothing worth browsing, so
  * it is left out of the listings entirely.
  */
 async function hasMessages(file: string) {
   try {
-    const { size } = await fs.stat(file);
-    // Nothing that large can be an untouched session, and reading it would hurt.
-    if (size > maxSessionBytes) return true;
-    const raw = await fs.readFile(file, "utf8");
-    return raw.includes('"type":"message"');
+    const stat = await fs.stat(file);
+    const cached = cacheGet(hasMessagesCache, file, stat);
+    if (cached) return cached.value;
+    const value = await probeForMessages(file, stat.size);
+    hasMessagesCache.set(file, {
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      value,
+    });
+    return value;
   } catch {
     return false;
   }
@@ -327,7 +410,7 @@ export function timestampFromFilename(file: string): Date | null {
 
 export async function listDates(location?: string) {
   const all = await collectFiles(location);
-  const used = await Promise.all(all.map(hasMessages));
+  const used = await mapLimit(all, 16, hasMessages);
   const files = all.filter((_, i) => used[i]);
 
   const dates: Record<string, number> = {};
@@ -361,17 +444,27 @@ export async function listSessions(targetDate?: string, location?: string) {
     });
   }
 
-  const loaded = await Promise.all(
-    files.map(async (file) => {
-      try {
-        const { stat, entries } = await load(file);
-        return summarize(file, stat, entries);
-      } catch (error: any) {
-        console.warn(`Skipping ${file}: ${error.message}`);
-        return null;
-      }
-    }),
-  );
+  // Bounded parallelism and (size, mtime)-keyed reuse: a day with hundreds of
+  // large sessions would otherwise spike memory and file descriptors.
+  const loaded = await mapLimit(files, 16, async (file) => {
+    try {
+      const known = cacheGet(summaryCache, file, await fs.stat(file));
+      if (known) return known.value;
+      const { stat, entries } = await load(file);
+      const value = summarize(file, stat, entries);
+      summaryCache.set(file, {
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        value,
+      });
+      return value;
+    } catch (error) {
+      console.warn(
+        `Skipping ${file}: ${error instanceof Error ? error.message : error}`,
+      );
+      return null;
+    }
+  });
 
   return loaded
     .filter((session): session is NonNullable<typeof session> =>
@@ -445,10 +538,8 @@ export async function getConversation(file: string) {
 }
 
 export async function launchSession(file: string) {
-  const { entries } = await load(file);
-  const cwd = entries.find((entry) => entry.type === "session")?.cwd;
-  if (!cwd || typeof cwd !== "string")
-    throw new Error("The session has no working directory.");
+  const cwd = await readSessionCwd(file);
+  if (!cwd) throw new Error("The session has no working directory.");
 
   // Values are passed as positional bash arguments, never interpolated into shell code.
   const script = 'cd -- "$1" || exit; exec "$2" --session "$3"';
@@ -469,6 +560,7 @@ export async function launchSession(file: string) {
 
 export async function deleteSession(file: string) {
   await fs.unlink(file);
+  dropFromCaches(file);
   await pruneEmptyDir(file);
 }
 
