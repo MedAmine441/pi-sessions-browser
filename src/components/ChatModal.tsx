@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
 import { Message, SessionDetail } from "@/types";
-import { localDateKey } from "@/lib/utils";
+import { localDateKey, messageOf } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 function MessageItem({ m, formatDate, onEdit }: { m: Message; formatDate: (d: string) => string; onEdit?: (id: string, text: string) => void }) {
@@ -132,7 +132,11 @@ type StreamPayload =
 export default function ChatModal({ file, onClose }: { file: string; onClose: (discardIfEmpty?: boolean) => void }) {
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null);
   const [sessionGone, setSessionGone] = useState(false);
-  const [hideToolCalls, setHideToolCalls] = useState(true);
+  const [hideToolCalls, setHideToolCalls] = useState(
+    () =>
+      typeof window === "undefined" ||
+      localStorage.getItem("piSessionBrowser_hideToolCalls") !== "false",
+  );
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameInput, setRenameInput] = useState("");
   const [chatInput, setChatInput] = useState("");
@@ -144,11 +148,6 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
   const resumedRef = useRef(false);
 
   const close = useCallback(() => onClose(!resumedRef.current), [onClose]);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("piSessionBrowser_hideToolCalls");
-    if (saved !== null) setHideToolCalls(saved === "true");
-  }, []);
 
   const toggleHideToolCalls = (val: boolean) => {
     setHideToolCalls(val);
@@ -195,11 +194,12 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
     return () => eventSource.close();
   }, [file]);
 
+  const itemCount = sessionDetail?.items.length ?? 0;
   useEffect(() => {
-    if (sessionDetail) {
+    if (itemCount > 0) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [sessionDetail?.items.length]);
+  }, [itemCount]);
 
   // Escape closes the dialog, matching the backdrop click.
   useEffect(() => {
@@ -222,8 +222,8 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
         const data = await res.json().catch(() => null);
         throw new Error(data?.error || "Failed to edit message");
       }
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      alert(messageOf(e));
     }
   };
 
@@ -238,8 +238,8 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
         body: JSON.stringify({ file: sessionDetail.file, name: renameInput })
       });
       if (!res.ok) throw new Error("Failed to rename session");
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      alert(messageOf(e));
     }
   };
 
@@ -253,8 +253,8 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
       });
       if (!res.ok) throw new Error("Failed to resume session");
       resumedRef.current = true;
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(messageOf(err));
     }
   };
 
@@ -294,8 +294,8 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
           params.set("session", data.file);
           router.push(`/${encodeURIComponent(today)}?${params.toString()}`);
         }
-      } catch (err: any) {
-        alert(err.message);
+      } catch (err) {
+        alert(messageOf(err));
       }
       return;
     }
@@ -310,11 +310,12 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
       });
       if (!res.ok) {
         let errMsg = "Failed to send message";
-        try { const data = await res.json(); if (data.error) errMsg = data.error; } catch (e) {}
+        const data = await res.json().catch(() => null);
+        if (data?.error) errMsg = data.error;
         throw new Error(errMsg);
       }
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(messageOf(err));
     } finally {
       setIsThinking(false);
     }

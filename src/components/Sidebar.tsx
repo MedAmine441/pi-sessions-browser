@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { FolderGit2, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { LOCATIONS_CHANGED, shortenPath } from "@/lib/utils";
+import { fetchJson, LOCATIONS_CHANGED, shortenPath } from "@/lib/utils";
+
+type LocationsResponse = { locations?: string[]; defaultLocation?: string };
 
 export default function Sidebar() {
   const router = useRouter();
@@ -12,29 +14,59 @@ export default function Sidebar() {
   const pathname = usePathname();
 
   const [locations, setLocations] = useState<string[]>([]);
+  const [defaultLocation, setDefaultLocation] = useState("");
   const [loading, setLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
 
   const currentLocation = searchParams.get("location") || "";
 
-  const loadLocations = () =>
-    fetch("/api/locations")
-      .then(r => r.json())
-      .then(data => {
+  const loadLocations = useCallback(
+    () =>
+      fetchJson<LocationsResponse>("/api/locations").then((data) => {
         setLocations(data.locations || []);
+        setDefaultLocation(data.defaultLocation || "");
         return data;
-      });
+      }),
+    [],
+  );
+
+  /** Rescopes the current page without treating it as a navigation. */
+  const updateLocation = useCallback(
+    (location: string) => {
+      // Read the live URL: this also runs from an event fired while another
+      // component is mid-navigation, and the rendered snapshot can lag behind.
+      const params = new URLSearchParams(window.location.search);
+      if (location) params.set("location", location);
+      else params.delete("location");
+      router.replace(`${pathname}?${params.toString()}`);
+    },
+    [pathname, router],
+  );
+
+  /** Picking a folder is a navigation: it opens that folder's timeline. */
+  const pickLocation = (location: string) => {
+    const params = new URLSearchParams(window.location.search);
+    if (location) params.set("location", location);
+    else params.delete("location");
+    params.delete("session");
+    router.push(`/?${params.toString()}`);
+    setIsOpen(false);
+  };
 
   useEffect(() => {
     loadLocations()
-      .then(data => {
-        if (!currentLocation && data.defaultLocation) {
-          updateLocation(data.defaultLocation);
-        }
-      })
-      .catch(err => console.error(err))
+      .catch((err) => console.error(err))
       .finally(() => setLoading(false));
-  }, []);
+  }, [loadLocations]);
+
+  // The home folder is only a default for the bare root page. Deep links to a
+  // date or session keep the scope they arrived with.
+  const appliedDefault = useRef(false);
+  useEffect(() => {
+    if (appliedDefault.current || !defaultLocation) return;
+    appliedDefault.current = true;
+    if (pathname === "/" && !currentLocation) updateLocation(defaultLocation);
+  }, [defaultLocation, pathname, currentLocation, updateLocation]);
 
   // Creating or deleting a session can add or retire a whole location.
   useEffect(() => {
@@ -49,16 +81,7 @@ export default function Sidebar() {
         .catch(err => console.error(err));
     window.addEventListener(LOCATIONS_CHANGED, onChanged);
     return () => window.removeEventListener(LOCATIONS_CHANGED, onChanged);
-  }, [currentLocation]);
-
-  const updateLocation = (location: string) => {
-    // Read the live URL: this also runs from an event fired while another
-    // component is mid-navigation, and the rendered snapshot can lag behind.
-    const params = new URLSearchParams(window.location.search);
-    if (location) params.set("location", location);
-    else params.delete("location");
-    router.replace(`${pathname}?${params.toString()}`);
-  };
+  }, [currentLocation, loadLocations, updateLocation]);
 
   // A session that has just been created has no messages yet, so its folder is
   // not a location the API reports — show it anyway while it is being viewed.
@@ -134,7 +157,7 @@ export default function Sidebar() {
               <li>
                 <Button
                   variant="ghost"
-                  onClick={() => { updateLocation(""); setIsOpen(false); }}
+                  onClick={() => pickLocation("")}
                   aria-current={currentLocation === "" ? "true" : undefined}
                   className={itemClasses(currentLocation === "")}
                 >
@@ -147,7 +170,7 @@ export default function Sidebar() {
                 <li key={loc}>
                   <Button
                     variant="ghost"
-                    onClick={() => { updateLocation(loc); setIsOpen(false); }}
+                    onClick={() => pickLocation(loc)}
                     aria-current={currentLocation === loc ? "true" : undefined}
                     className={itemClasses(currentLocation === loc)}
                     title={loc}

@@ -6,7 +6,9 @@ import { Folder, Trash2, ArrowLeft, RefreshCw, Terminal } from "lucide-react";
 import { SessionInfo } from "@/types";
 import {
   announceLocationsChanged,
+  fetchJson,
   formatReadableDate,
+  messageOf,
   shortenPath,
 } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -27,35 +29,48 @@ const titleOf = (session: SessionInfo) =>
 export default function SessionsGrid({ date }: { date: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  // null is "still loading"; refreshes that keep the old grid leave it in place.
+  const [sessions, setSessions] = useState<SessionInfo[] | null>(null);
+  const [fetchCount, setFetchCount] = useState(0);
   const [pendingDelete, setPendingDelete] = useState<SessionInfo | null>(null);
 
   // Read open session from query param ?session=file
   const openSessionFile = searchParams.get("session");
   const location = searchParams.get("location") || "";
+  const loading = sessions === null;
 
-  const fetchSessions = async () => {
-    setLoading(true);
-    try {
-      let url = `/api/sessions?date=${encodeURIComponent(date)}`;
-      if (location) {
-        url += `&location=${encodeURIComponent(location)}`;
-      }
-      const res = await fetch(url);
-      if (!res.ok) throw new Error("Failed to fetch sessions");
-      const data = await res.json();
-      setSessions(data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+  // A different date or folder is a different dataset — blank the grid.
+  const dataKey = `${date} ${location}`;
+  const [prevDataKey, setPrevDataKey] = useState(dataKey);
+  if (prevDataKey !== dataKey) {
+    setPrevDataKey(dataKey);
+    setSessions(null);
+  }
+
+  /** Refetch behind the current grid — no loading flash. */
+  const refreshSessions = () => setFetchCount((n) => n + 1);
+  /** Refetch showing the loading state, for the explicit Refresh button. */
+  const reloadSessions = () => {
+    setSessions(null);
+    setFetchCount((n) => n + 1);
   };
 
   useEffect(() => {
-    fetchSessions();
-  }, [date, location]);
+    // Abort superseded fetches so a slow response can't overwrite a newer one.
+    const controller = new AbortController();
+    let url = `/api/sessions?date=${encodeURIComponent(date)}`;
+    if (location) {
+      url += `&location=${encodeURIComponent(location)}`;
+    }
+    fetchJson<SessionInfo[]>(url, { signal: controller.signal })
+      .then((data) => setSessions(Array.isArray(data) ? data : []))
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        console.error(err);
+        setSessions((prev) => prev ?? []);
+      });
+    return () => controller.abort();
+  }, [date, location, fetchCount]);
 
   const handleDeleteClick = (e: React.MouseEvent, session: SessionInfo) => {
     e.preventDefault();
@@ -67,19 +82,17 @@ export default function SessionsGrid({ date }: { date: string }) {
     const session = pendingDelete;
     if (!session) return;
     setPendingDelete(null);
-    setSessions((prev) => prev.filter((s) => s.file !== session.file));
+    setSessions((prev) => prev && prev.filter((s) => s.file !== session.file));
 
     try {
-      const res = await fetch(
-        `/api/sessions?file=${encodeURIComponent(session.file)}`,
-        { method: "DELETE" },
-      );
-      if (!res.ok) throw new Error("Failed to delete session");
+      await fetchJson(`/api/sessions?file=${encodeURIComponent(session.file)}`, {
+        method: "DELETE",
+      });
       announceLocationsChanged();
-      fetchSessions();
     } catch (err) {
       console.error(err);
-      fetchSessions();
+    } finally {
+      refreshSessions();
     }
   };
 
@@ -87,14 +100,13 @@ export default function SessionsGrid({ date }: { date: string }) {
     e.preventDefault();
     e.stopPropagation();
     try {
-      const res = await fetch("/api/resume", {
+      await fetchJson("/api/resume", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ file }),
       });
-      if (!res.ok) throw new Error("Failed to resume session");
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(messageOf(err));
     }
   };
 
@@ -118,7 +130,8 @@ export default function SessionsGrid({ date }: { date: string }) {
       }).catch((err) => console.error(err));
     }
     announceLocationsChanged();
-    fetchSessions(); // Refresh list to get new preview/counts
+    // Refresh previews/counts behind the grid — no flash on close.
+    refreshSessions();
   };
 
   return (
@@ -145,7 +158,7 @@ export default function SessionsGrid({ date }: { date: string }) {
           <Button
             variant="ghost"
             size="icon"
-            onClick={fetchSessions}
+            onClick={reloadSessions}
             className="group size-11 bg-stone-900/60 hover:bg-stone-800 dark:hover:bg-stone-800 border-white/10 rounded-xl text-stone-300 hover:text-white backdrop-blur-md"
             title="Refresh"
             aria-label="Refresh sessions"
@@ -160,7 +173,7 @@ export default function SessionsGrid({ date }: { date: string }) {
 
       <div className="flex-1 overflow-y-auto w-full custom-scrollbar">
         <div className="max-w-7xl mx-auto p-6 md:p-8">
-          {loading ? (
+          {sessions === null ? (
             <p
               className="text-center py-20 text-stone-500 font-mono animate-pulse"
               role="status"
@@ -182,7 +195,9 @@ export default function SessionsGrid({ date }: { date: string }) {
                 const title = titleOf(s);
                 return (
                   <li
-                    key={s.id}
+                    // The file path is the unique identity — a copied .jsonl
+                    // keeps its header id, so ids can collide.
+                    key={s.file}
                     className="group bg-stone-900/40 hover:bg-stone-800/60 backdrop-blur-xl border border-white/5 hover:border-amber-500/30 p-5 rounded-3xl transition-all duration-300 relative overflow-hidden"
                   >
                     <div className="flex justify-between items-start gap-2 mb-3">

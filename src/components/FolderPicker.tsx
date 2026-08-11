@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { CornerLeftUp, Folder, FolderOpen, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { shortenPath } from "@/lib/utils";
+import { fetchJson, messageOf, shortenPath } from "@/lib/utils";
 
 type Listing = {
   path: string;
@@ -22,29 +22,29 @@ export default function FolderPicker({
   // Empty means "wherever the server starts you", which is the home folder.
   const [path, setPath] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
   const [showHidden, setShowHidden] = useState(false);
+  // Only the very first listing has nothing to show; while navigating, the
+  // previous folder stays visible until the next one arrives.
+  const loading = !listing && !error;
+
+  /** Clears a stale error in the event itself, so the effect only fetches. */
+  const navigateTo = (next: string) => {
+    setError("");
+    setPath(next);
+  };
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
+    const controller = new AbortController();
     const url = path ? `/api/browse?path=${encodeURIComponent(path)}` : "/api/browse";
-    fetch(url)
-      .then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Failed to read that folder");
-        return data as Listing;
-      })
+    fetchJson<Listing>(url, { signal: controller.signal })
       .then((data) => {
-        if (cancelled) return;
         setListing(data);
         setError("");
       })
-      .catch((err) => !cancelled && setError(err.message))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
+      .catch((err) => {
+        if (!controller.signal.aborted) setError(messageOf(err));
+      });
+    return () => controller.abort();
   }, [path]);
 
   // Escape closes the dialog, matching the backdrop click.
@@ -103,7 +103,7 @@ export default function FolderPicker({
           <div className="mt-4 flex items-center justify-between gap-3">
             <Button
               variant="ghost"
-              onClick={() => listing?.parent && setPath(listing.parent)}
+              onClick={() => listing?.parent && navigateTo(listing.parent)}
               disabled={!listing?.parent}
               className="h-auto gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 dark:hover:bg-white/10 text-stone-300 hover:text-white rounded-xl text-xs font-bold"
             >
@@ -139,7 +139,7 @@ export default function FolderPicker({
                   <Button
                     variant="ghost"
                     onClick={() =>
-                      setPath(`${listing!.path === "/" ? "" : listing!.path}/${name}`)
+                      navigateTo(`${listing!.path === "/" ? "" : listing!.path}/${name}`)
                     }
                     className="h-auto w-full justify-start gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-stone-300 hover:bg-amber-500/10 dark:hover:bg-amber-500/10 hover:text-amber-200"
                   >
