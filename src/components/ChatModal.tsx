@@ -3,10 +3,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
-import { Message, SessionDetail } from "@/types";
+import { Message, SessionDetail, SessionModel } from "@/types";
 import { localDateKey, messageOf } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
+import { ModelDialog } from "@/components/PiControls";
+import { Cpu } from "lucide-react";
 
 function MessageItem({ m, formatDate, onEdit }: { m: Message; formatDate: (d?: string) => string; onEdit?: (id: string, text: string) => void }) {
   const isTool = m.role === "toolResult" || (m.toolName && (m.toolName.includes("bash") || m.toolName.includes("read")));
@@ -127,7 +129,12 @@ function MessageItem({ m, formatDate, onEdit }: { m: Message; formatDate: (d?: s
 /** What /api/stream sends: one snapshot, then only what changed. */
 type StreamPayload =
   | { kind: "snapshot"; detail: SessionDetail }
-  | { kind: "append"; items: Message[]; name?: string | null }
+  | {
+      kind: "append";
+      items: Message[];
+      name?: string | null;
+      model?: SessionModel;
+    }
   | { kind: "gone" };
 
 export default function ChatModal({ file, onClose }: { file: string; onClose: (discardIfEmpty?: boolean) => void }) {
@@ -142,6 +149,7 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
   const [renameInput, setRenameInput] = useState("");
   const [chatInput, setChatInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
+  const [pickingModel, setPickingModel] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Pi owns the file once it is running in a terminal, so it must not be
@@ -182,6 +190,7 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
               ...prev,
               items,
               ...(payload.name !== undefined ? { name: payload.name } : {}),
+              ...(payload.model !== undefined ? { model: payload.model } : {}),
             };
           });
         } else if (payload.kind === "gone") {
@@ -400,6 +409,19 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
               <div className="text-stone-500 truncate ml-5 opacity-50">
                 {sessionDetail?.file || "..."}
               </div>
+              <Button
+                variant="ghost"
+                onClick={() => setPickingModel(true)}
+                title="Change the model for this session"
+                className="h-auto w-fit justify-start gap-1.5 rounded-lg bg-white/5 px-2 py-1 font-mono text-[11px] text-stone-300 hover:bg-white/10 dark:hover:bg-white/10 hover:text-amber-200"
+              >
+                <Cpu className="h-3 w-3 text-amber-400" aria-hidden="true" />
+                <span className="truncate">
+                  {sessionDetail?.model
+                    ? `${sessionDetail.model.provider}/${sessionDetail.model.modelId}`
+                    : "default model"}
+                </span>
+              </Button>
             </div>
           </div>
 
@@ -492,6 +514,16 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
           </form>
         </div>
       </div>
+
+      {sessionDetail && (
+        <ModelDialog
+          open={pickingModel}
+          onOpenChange={setPickingModel}
+          scope="session"
+          file={sessionDetail.file}
+          current={sessionDetail.model}
+        />
+      )}
     </div>
   );
 }

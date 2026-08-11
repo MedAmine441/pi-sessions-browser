@@ -552,6 +552,7 @@ export function conversationFromEntries(file: string, entries: SessionEntry[]) {
     name: name || null,
     cwd: header.cwd,
     createdAt: header.timestamp,
+    model: modelFromEntries(entries),
     items,
     preview,
   };
@@ -718,10 +719,15 @@ export async function createNewSessionFile(targetCwd?: string) {
   return file;
 }
 
-export async function renameSession(file: string, newName: string) {
-  // Matches Pi's own session_info entries: an 8-char id chained to the current
-  // leaf via parentId, with newlines stripped from the name. Anything else is
-  // invisible to Pi when it resumes the session.
+/**
+ * Appends an entry in Pi's own tree format: an 8-char id chained to the
+ * current leaf via parentId. Anything else is invisible to Pi when it
+ * resumes the session.
+ */
+async function appendChainedEntry(
+  file: string,
+  fields: Record<string, unknown>,
+) {
   const { entries } = await load(file);
   const ids = new Set(entries.map((entry) => entry.id));
   let id: string = randomUUID();
@@ -736,13 +742,56 @@ export async function renameSession(file: string, newName: string) {
     (entry) => entry.type !== "session" && entry.id,
   );
   const entry = {
-    type: "session_info",
+    ...fields,
     id,
     parentId: leaf?.id ?? null,
     timestamp: new Date().toISOString(),
-    name: newName.replace(/[\r\n]+/g, " ").trim(),
   };
   await fs.appendFile(file, JSON.stringify(entry) + "\n", "utf-8");
+}
+
+export async function renameSession(file: string, newName: string) {
+  await appendChainedEntry(file, {
+    type: "session_info",
+    name: newName.replace(/[\r\n]+/g, " ").trim(),
+  });
+}
+
+/**
+ * Pi restores a session's model from the last model_change entry (or
+ * assistant message) on the active path, so appending one is the native way
+ * to switch the model the next `pi --session … -p` run will use.
+ */
+export async function appendModelChange(
+  file: string,
+  provider: string,
+  modelId: string,
+) {
+  await appendChainedEntry(file, { type: "model_change", provider, modelId });
+}
+
+export async function appendThinkingLevelChange(
+  file: string,
+  thinkingLevel: string,
+) {
+  await appendChainedEntry(file, { type: "thinking_level_change", thinkingLevel });
+}
+
+/** The model the session is currently on, mirroring Pi's own restore rule. */
+export function modelFromEntries(entries: SessionEntry[]) {
+  let model: { provider: string; modelId: string } | null = null;
+  for (const entry of entries) {
+    if (entry.type === "model_change") {
+      const change = entry as { provider?: string; modelId?: string };
+      if (change.provider && change.modelId)
+        model = { provider: change.provider, modelId: change.modelId };
+    } else if (entry.type === "message" && entry.message?.role === "assistant") {
+      const message = entry.message as { provider?: string; model?: string };
+      if (message.provider && message.model)
+        model = { provider: message.provider, modelId: message.model };
+    }
+  }
+  return model;
 }
 
 /** An edit that could not land, with the HTTP status that describes why. */

@@ -3,6 +3,7 @@ import {
   safeSessionPath,
   conversationFromEntries,
   conversationItemFromEntry,
+  modelFromEntries,
   nameFromEntry,
   parseEntries,
   maxSessionBytes,
@@ -95,15 +96,19 @@ export async function GET(request: Request) {
           if (end === 0) return;
           const items = [];
           let name: string | null | undefined;
-          for (const entry of parseEntries(data.subarray(0, end).toString("utf8"))) {
+          const appended = parseEntries(data.subarray(0, end).toString("utf8"));
+          for (const entry of appended) {
             const renamed = nameFromEntry(entry);
             if (renamed !== undefined) name = renamed;
             const item = conversationItemFromEntry(entry);
             if (item) items.push(item);
           }
+          // A model_change entry or a fresh assistant message moves the
+          // session onto a (possibly) different model.
+          const model = modelFromEntries(appended) ?? undefined;
           offset += end;
-          if (items.length || name !== undefined)
-            send({ kind: "append", items, name });
+          if (items.length || name !== undefined || model !== undefined)
+            send({ kind: "append", items, name, model });
         } finally {
           await handle.close();
         }

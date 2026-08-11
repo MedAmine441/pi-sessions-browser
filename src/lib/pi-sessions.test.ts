@@ -127,6 +127,7 @@ describe("Pi session storage", () => {
       cwd: "/work",
       createdAt: "2026-01-01T10:00:00.000Z",
       preview: "Hello [image]",
+      model: null,
       items: [
         {
           id: "user-1",
@@ -299,6 +300,55 @@ describe("Pi session storage", () => {
     await expect(sessions.discardIfEmpty(empty)).resolves.toBe(true);
     await expect(fs.stat(empty)).rejects.toThrow();
     await expect(fs.stat(used)).resolves.toBeTruthy();
+  });
+
+  it("tracks and switches the session's model the way pi does", async () => {
+    const file = await writeSession("project/model.jsonl", [
+      {
+        type: "session",
+        id: "model",
+        cwd: "/work",
+        timestamp: "2026-01-01T10:00:00.000Z",
+      },
+      {
+        type: "message",
+        id: "msg-1",
+        parentId: null,
+        timestamp: "2026-01-01T10:01:00.000Z",
+        message: { role: "user", content: "Hi" },
+      },
+      {
+        type: "message",
+        id: "msg-2",
+        parentId: "msg-1",
+        timestamp: "2026-01-01T10:02:00.000Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Hello" }],
+          provider: "anthropic",
+          model: "claude-opus-4-6",
+        },
+      },
+    ]);
+
+    // The latest assistant message carries the current model…
+    await expect(sessions.getConversation(file)).resolves.toMatchObject({
+      model: { provider: "anthropic", modelId: "claude-opus-4-6" },
+    });
+
+    // …and an appended model_change (pi's own mechanism) overrides it.
+    await sessions.appendModelChange(file, "moonshotai", "kimi-k2-thinking");
+    const raw = await fs.readFile(file, "utf8");
+    const appended = JSON.parse(raw.trim().split("\n").at(-1)!);
+    expect(appended).toMatchObject({
+      type: "model_change",
+      provider: "moonshotai",
+      modelId: "kimi-k2-thinking",
+      parentId: "msg-2",
+    });
+    await expect(sessions.getConversation(file)).resolves.toMatchObject({
+      model: { provider: "moonshotai", modelId: "kimi-k2-thinking" },
+    });
   });
 
   it("only accepts JSONL files contained in the configured session directory", async () => {

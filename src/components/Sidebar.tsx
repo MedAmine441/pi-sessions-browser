@@ -5,6 +5,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { FolderGit2, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { fetchJson, LOCATIONS_CHANGED, shortenPath } from "@/lib/utils";
+import PiControls from "@/components/PiControls";
 
 type LocationsResponse = { locations?: string[]; defaultLocation?: string };
 
@@ -183,6 +184,8 @@ export default function Sidebar() {
             </ul>
           )}
         </div>
+
+        <PiControls />
       </nav>
     </>
   );
