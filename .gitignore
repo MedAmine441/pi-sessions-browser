@@ -18,7 +18,11 @@
 /out/
 
 # production
-/build
+# Ignore build contents rather than the folder itself: a fully excluded
+# directory can never have files re-included from under it.
+/build/*
+# ...except the electron-builder icon the packaged build needs.
+!/build/icon.svg
 /dist
 
 # misc

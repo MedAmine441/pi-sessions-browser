@@ -6,22 +6,22 @@ A stunning, high-performance interface designed for people using the Pi coding a
 
 ## ✨ Features
 
-- **Ultra-Fast Timeline**: Extracts timestamps directly from filenames, rendering tens of thousands of session dates in milliseconds without parsing heavy `.jsonl` files.
+- **Ultra-Fast Timeline**: Extracts timestamps directly from filenames and caches per-file metadata keyed by size + mtime, so tens of thousands of session dates render without re-reading heavy `.jsonl` files.
 - **True Real-Time Streaming**: Implements Server-Sent Events (SSE) instead of traditional polling. The UI reacts instantly to incoming AI messages with zero lag.
 - **Native JSONL Manipulation**:
   - **In-App Creation**: Start a pristine new session directly from the browser; no terminal required.
-  - **Session Renaming**: Dynamically rewrite the underlying `.jsonl` headers by simply clicking the title.
+  - **Session Renaming**: Append a `session_info` entry in Pi's own format by simply clicking the title — Pi sees the new name too.
   - **Inline Message Editing**: Fix typos in past messages; the backend surgically rewrites historical lines inside the `.jsonl` file.
 - **Dynamic Routing**: Clean URL architecture (`/[date]?session=[file]`) utilizing Next.js App Router for deep-linking and snappy transitions.
 - **Cinematic UI**: Powered by Tailwind CSS, featuring glassmorphism, micro-animations, and a highly immersive ambient background canvas (Liquid & Embers).
 
 ## 🚀 Tech Stack
 
-- **Framework**: Next.js 15 (App Router)
+- **Framework**: Next.js 16 (App Router)
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS
 - **Icons**: Lucide React
-- **Animations**: `tailwindcss-animate`, Custom WebGL/Canvas
+- **Animations**: `tw-animate-css`, Custom WebGL/Canvas
 
 ## 🛠️ Getting Started
 
@@ -37,8 +37,12 @@ npm install
 
 ### 2. Configuration
 
-The application automatically reads your Pi sessions from the default local directory:
-`~/.pi/agent/sessions/--home-pc--`
+The application automatically reads your Pi sessions from the default root:
+`~/.pi/agent/sessions`
+
+Each working directory Pi has run in appears as its own location (for example
+`--home-pc--` holds the sessions started in `/home/pc`). Set `PI_SESSION_DIR`
+to point somewhere else.
 
 _(Note: The root directory is managed in `src/lib/pi-sessions.ts`)_
 
@@ -60,6 +64,21 @@ You can build a standalone desktop version of the application using Electron:
 # Build the application (Next.js standalone + Electron)
 npm run electron:build
 ```
+
+> **Why `build:standalone` renames `node_modules`**: electron-builder rewrites
+> any `node_modules` folder it finds inside `extraResources`, which corrupts
+> the standalone server's dependencies. The script therefore ships them as
+> `standalone_node_modules`, and `main.js` points Node's resolution back at
+> that folder via `NODE_PATH`. If a Next upgrade changes the standalone output
+> layout, this is the first place to look.
+
+> **Networking**: the server always binds `127.0.0.1` (the Electron shell sets
+> `HOSTNAME`, and the `dev`/`start` scripts pass `-H 127.0.0.1`). If you run
+> the standalone server yourself, keep `HOSTNAME=127.0.0.1` set — Next's
+> standalone output otherwise defaults to listening on every interface, which
+> would expose your sessions (and the agent-driving API) to the LAN. A request
+> guard in `src/proxy.ts` additionally rejects non-localhost and cross-site
+> requests.
 
 > **Customizing the App Icon**: The build will automatically use the icon file located at `build/icon.svg`. If you want to use your own icon (e.g. `.png`), simply place it in the `build/` folder, delete `icon.svg`, and update the `"icon"` field in the `package.json` build config before running the build command.
 

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <circle cx="256" cy="256" r="230" fill="#3B5998" />
+  <!-- Inner planet -->
+  <circle cx="256" cy="256" r="120" fill="#FFFFFF" />
+  <!-- Planetary ring -->
+  <path d="M 100 300 Q 256 120 412 300" stroke="#00BFFF" stroke-width="40" stroke-linecap="round" fill="none" transform="rotate(-15 256 256)" />
+</svg>
