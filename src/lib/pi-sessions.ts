@@ -581,25 +581,12 @@ export async function listDates(location?: string) {
     .sort((a, b) => b.date.localeCompare(a.date));
 }
 
-export async function listSessions(targetDate?: string, location?: string) {
-  let files = await collectFiles(location);
-
-  if (targetDate) {
-    // Links from before the canonical key carried locale-formatted dates;
-    // parse those rather than turning old bookmarks into empty pages.
-    const wanted = /^\d{4}-\d{2}-\d{2}$/.test(targetDate)
-      ? targetDate
-      : Number.isNaN(Date.parse(targetDate))
-        ? null
-        : localDateKey(new Date(targetDate));
-    files = files.filter((file) => {
-      const timestamp = timestampFromFilename(file);
-      return timestamp !== null && localDateKey(timestamp) === wanted;
-    });
-  }
-
-  // Bounded parallelism and (size, mtime)-keyed reuse: a day with hundreds of
-  // large sessions would otherwise spike memory and file descriptors.
+/**
+ * Session summaries for explicit files, unreadable ones skipped. Bounded
+ * parallelism and (size, mtime)-keyed reuse: a day with hundreds of large
+ * sessions would otherwise spike memory and file descriptors.
+ */
+export async function getSessionInfos(files: string[]) {
   const loaded = await mapLimit(files, 16, async (file) => {
     try {
       const known = cacheGet(summaryCache, file, await fs.stat(file));
@@ -619,11 +606,30 @@ export async function listSessions(targetDate?: string, location?: string) {
       return null;
     }
   });
+  return loaded.filter(
+    (session): session is NonNullable<typeof session> => session !== null,
+  );
+}
 
-  return loaded
-    .filter((session): session is NonNullable<typeof session> =>
-      Boolean(session && session.messageCount > 0),
-    )
+export async function listSessions(targetDate?: string, location?: string) {
+  let files = await collectFiles(location);
+
+  if (targetDate) {
+    // Links from before the canonical key carried locale-formatted dates;
+    // parse those rather than turning old bookmarks into empty pages.
+    const wanted = /^\d{4}-\d{2}-\d{2}$/.test(targetDate)
+      ? targetDate
+      : Number.isNaN(Date.parse(targetDate))
+        ? null
+        : localDateKey(new Date(targetDate));
+    files = files.filter((file) => {
+      const timestamp = timestampFromFilename(file);
+      return timestamp !== null && localDateKey(timestamp) === wanted;
+    });
+  }
+
+  return (await getSessionInfos(files))
+    .filter((session) => session.messageCount > 0)
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 }
 

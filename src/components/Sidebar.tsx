@@ -2,9 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { FolderGit2, Menu, X } from "lucide-react";
+import { FolderGit2, Menu, Pin, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { fetchJson, LOCATIONS_CHANGED, shortenPath } from "@/lib/utils";
+import type { SessionInfo } from "@/types";
+import {
+  dateKeyOfSessionFile,
+  fetchJson,
+  localDateKey,
+  LOCATIONS_CHANGED,
+  PINS_CHANGED,
+  shortenPath,
+} from "@/lib/utils";
 import PiControls from "@/components/PiControls";
 
 type LocationsResponse = { locations?: string[]; defaultLocation?: string };
@@ -18,6 +26,31 @@ export default function Sidebar() {
   const [defaultLocation, setDefaultLocation] = useState("");
   const [loading, setLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
+  const [pinnedSessions, setPinnedSessions] = useState<SessionInfo[]>([]);
+
+  // Pinned sessions surface here regardless of the date they live under.
+  useEffect(() => {
+    const loadPins = () =>
+      fetchJson<{ sessions: SessionInfo[] }>("/api/pins")
+        .then((data) => setPinnedSessions(data.sessions || []))
+        .catch(() => {});
+    loadPins();
+    window.addEventListener(PINS_CHANGED, loadPins);
+    window.addEventListener(LOCATIONS_CHANGED, loadPins);
+    return () => {
+      window.removeEventListener(PINS_CHANGED, loadPins);
+      window.removeEventListener(LOCATIONS_CHANGED, loadPins);
+    };
+  }, []);
+
+  const openPinnedSession = (session: SessionInfo) => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("location", session.cwd);
+    params.set("session", session.file);
+    const date = dateKeyOfSessionFile(session.file) || localDateKey(new Date());
+    router.push(`/${encodeURIComponent(date)}?${params.toString()}`);
+    setIsOpen(false);
+  };
 
   const currentLocation = searchParams.get("location") || "";
 
@@ -149,6 +182,30 @@ export default function Sidebar() {
         </div>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
+          {pinnedSessions.length > 0 && (
+            <section aria-label="Pinned sessions" className="mb-4">
+              <h3 className="px-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-stone-600">
+                Pinned
+              </h3>
+              <ul className="space-y-1">
+                {pinnedSessions.map((session) => (
+                  <li key={session.file}>
+                    <Button
+                      variant="ghost"
+                      onClick={() => openPinnedSession(session)}
+                      className={itemClasses(false)}
+                      title={session.name || session.preview || session.file}
+                    >
+                      <Pin className="w-4 h-4 shrink-0 text-amber-500/70" aria-hidden="true" />
+                      <span className="min-w-0 flex-1 truncate text-sm">
+                        {session.name || session.preview || "Untitled Session"}
+                      </span>
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           {loading ? (
             <p className="text-sm text-stone-500 animate-pulse px-2">Loading locations...</p>
           ) : shown.length === 0 ? (

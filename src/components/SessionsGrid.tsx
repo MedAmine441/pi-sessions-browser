@@ -9,15 +9,18 @@ import {
   RefreshCw,
   Terminal,
   ListFilter,
+  Pin,
 } from "lucide-react";
 import { SessionInfo } from "@/types";
 import {
   announceLocationsChanged,
+  announcePinsChanged,
   fetchJson,
   formatBytes,
   formatCost,
   formatReadableDate,
   messageOf,
+  PINS_CHANGED,
   shortenPath,
 } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -77,17 +80,52 @@ export default function SessionsGrid({ date }: { date: string }) {
     return [...keys].sort();
   }, [sessions]);
 
+  const [pinnedFiles, setPinnedFiles] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const loadPins = () =>
+      fetchJson<{ pinned: string[] }>("/api/pins")
+        .then((data) => setPinnedFiles(new Set(data.pinned || [])))
+        .catch(() => {});
+    loadPins();
+    window.addEventListener(PINS_CHANGED, loadPins);
+    return () => window.removeEventListener(PINS_CHANGED, loadPins);
+  }, []);
+
+  const togglePin = async (e: React.MouseEvent, session: SessionInfo) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const pinned = !pinnedFiles.has(session.file);
+    try {
+      const data = await fetchJson<{ pinned: string[] }>("/api/pins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file: session.file, pinned }),
+      });
+      setPinnedFiles(new Set(data.pinned || []));
+      announcePinsChanged();
+    } catch (err) {
+      toast(messageOf(err));
+    }
+  };
+
   const visibleSessions = useMemo(() => {
     let list = sessions || [];
     if (modelFilter) list = list.filter((s) => modelKeyOf(s) === modelFilter);
     if (errorsOnly) list = list.filter((s) => s.hasError);
-    if (sortBy === "updated") return list; // the server order
-    const sorted = [...list];
-    if (sortBy === "cost") sorted.sort((a, b) => b.cost - a.cost);
-    else if (sortBy === "size") sorted.sort((a, b) => b.size - a.size);
-    else sorted.sort((a, b) => b.messageCount - a.messageCount);
-    return sorted;
-  }, [sessions, modelFilter, errorsOnly, sortBy]);
+    let sorted = list;
+    if (sortBy !== "updated") {
+      sorted = [...list];
+      if (sortBy === "cost") sorted.sort((a, b) => b.cost - a.cost);
+      else if (sortBy === "size") sorted.sort((a, b) => b.size - a.size);
+      else sorted.sort((a, b) => b.messageCount - a.messageCount);
+    }
+    // Pinned cards float above the rest whatever the sort says.
+    return [
+      ...sorted.filter((s) => pinnedFiles.has(s.file)),
+      ...sorted.filter((s) => !pinnedFiles.has(s.file)),
+    ];
+  }, [sessions, modelFilter, errorsOnly, sortBy, pinnedFiles]);
 
   const isFiltered = Boolean(modelFilter || errorsOnly);
 
@@ -368,6 +406,24 @@ export default function SessionsGrid({ date }: { date: string }) {
                         </Button>
                       </h2>
                       <div className="relative z-10 flex shrink-0 gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(e) => togglePin(e, s)}
+                          className={
+                            pinnedFiles.has(s.file)
+                              ? "bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 dark:hover:bg-amber-500/25 hover:text-amber-300 rounded-xl"
+                              : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 bg-black/20 hover:bg-amber-500/20 dark:hover:bg-amber-500/20 text-stone-400 hover:text-amber-400 rounded-xl"
+                          }
+                          title={pinnedFiles.has(s.file) ? "Unpin session" : "Pin session"}
+                          aria-label={`${pinnedFiles.has(s.file) ? "Unpin" : "Pin"} "${title}"`}
+                          aria-pressed={pinnedFiles.has(s.file)}
+                        >
+                          <Pin
+                            className={`w-4 h-4 ${pinnedFiles.has(s.file) ? "fill-current" : ""}`}
+                            aria-hidden="true"
+                          />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"

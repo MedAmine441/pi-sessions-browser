@@ -16,6 +16,13 @@ export function announceLocationsChanged() {
   window.dispatchEvent(new Event(LOCATIONS_CHANGED));
 }
 
+/** Fired whenever a session is pinned or unpinned, for the sidebar list. */
+export const PINS_CHANGED = "pi-sessions:pins-changed";
+
+export function announcePinsChanged() {
+  window.dispatchEvent(new Event(PINS_CHANGED));
+}
+
 /**
  * Fetch + parse + error extraction in one place, so response shapes are typed
  * at the boundary and API error payloads become thrown messages.
@@ -66,6 +73,20 @@ export function formatBytes(bytes: number) {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${bytes} B`;
+}
+
+/**
+ * The timeline date key a session file lives under: sessions are grouped by
+ * the UTC stamp in their filename, converted to the local day.
+ */
+export function dateKeyOfSessionFile(file: string) {
+  const match = file.match(
+    /(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z[^/]*\.jsonl$/,
+  );
+  if (!match) return null;
+  const [, date, h, m, s, ms] = match;
+  const parsed = new Date(`${date}T${h}:${m}:${s}.${ms}Z`);
+  return Number.isNaN(parsed.getTime()) ? null : localDateKey(parsed);
 }
 
 /** Renders a canonical YYYY-MM-DD key (or any ISO timestamp) for display. */
