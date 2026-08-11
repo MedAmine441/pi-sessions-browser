@@ -734,6 +734,24 @@ describe("Pi session storage", () => {
     await expect(sessions.searchSessions("f")).resolves.toEqual([]);
   });
 
+  it("matches names case-insensitively in both directions", async () => {
+    await writeSession("--work-c--/2026-03-08T12-00-00-000Z_w.jsonl", [
+      { type: "session", id: "cased", cwd: "/work/c", timestamp: "2026-03-08T12:00:00.000Z" },
+      { type: "session_info", id: "n1", name: "Screenshot checksum analysis" },
+      {
+        type: "message",
+        id: "m1",
+        timestamp: "2026-03-08T12:01:00.000Z",
+        message: { role: "user", content: "look at this" },
+      },
+    ]);
+
+    for (const query of ["screen", "SCREENSHOT", "Checksum"]) {
+      const results = await sessions.searchSessions(query);
+      expect(results.map((r) => r.id)).toContain("cased");
+    }
+  });
+
   it("only accepts JSONL files contained in the configured session directory", async () => {
     const file = await writeSession("safe/session.jsonl", []);
     const outside = join(tmpdir(), "outside-session.jsonl");

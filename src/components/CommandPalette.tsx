@@ -87,7 +87,9 @@ export default function CommandPalette() {
   }, [handleOpenChange]);
 
   // Debounced full-text search once the query is worth scanning for. All
-  // state changes happen inside the timer, past the debounce.
+  // state changes happen inside the timer, past the debounce. Always global:
+  // scoping to the sidebar's folder silently hid every other folder's
+  // sessions, and each hit already names the folder it lives in.
   useEffect(() => {
     if (!open) return;
     const needle = query.trim();
@@ -100,9 +102,7 @@ export default function CommandPalette() {
           return;
         }
         setSearching(true);
-        const url = location
-          ? `/api/search?q=${encodeURIComponent(needle)}&location=${encodeURIComponent(location)}`
-          : `/api/search?q=${encodeURIComponent(needle)}`;
+        const url = `/api/search?q=${encodeURIComponent(needle)}`;
         fetchJson<{ results: SearchHit[] }>(url, { signal: controller.signal })
           .then((data) => {
             setHits(data.results || []);
@@ -118,7 +118,7 @@ export default function CommandPalette() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [open, query, location]);
+  }, [open, query]);
 
   const createSessionIn = useCallback(
     async (cwd: string) => {
