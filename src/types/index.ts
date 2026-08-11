@@ -14,7 +14,7 @@ export type Message = {
   id: string;
   role: string;
   text: string;
-  timestamp: string;
+  timestamp?: string;
   toolName?: string;
 };
 

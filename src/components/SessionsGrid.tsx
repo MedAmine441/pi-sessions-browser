@@ -22,6 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import ChatModal from "./ChatModal";
+import { toast } from "@/components/ui/toast";
 
 const titleOf = (session: SessionInfo) =>
   session.name || session.preview || "Untitled Session";
@@ -106,7 +107,7 @@ export default function SessionsGrid({ date }: { date: string }) {
         body: JSON.stringify({ file }),
       });
     } catch (err) {
-      alert(messageOf(err));
+      toast(messageOf(err));
     }
   };
 

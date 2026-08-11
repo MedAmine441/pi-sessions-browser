@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import Liquid from "@/components/canvasui/Liquid";
 import Embers from "@/components/canvasui/Embers";
 import Sidebar from "@/components/Sidebar";
+import { Toaster } from "@/components/ui/toast";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -18,6 +19,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
+      <Toaster />
     </Liquid>
   );
 }

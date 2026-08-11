@@ -6,8 +6,9 @@ import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw }
 import { Message, SessionDetail } from "@/types";
 import { localDateKey, messageOf } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/toast";
 
-function MessageItem({ m, formatDate, onEdit }: { m: Message; formatDate: (d: string) => string; onEdit?: (id: string, text: string) => void }) {
+function MessageItem({ m, formatDate, onEdit }: { m: Message; formatDate: (d?: string) => string; onEdit?: (id: string, text: string) => void }) {
   const isTool = m.role === "toolResult" || (m.toolName && (m.toolName.includes("bash") || m.toolName.includes("read")));
   const [isOpen, setIsOpen] = useState(!isTool);
   const [isEditing, setIsEditing] = useState(false);
@@ -223,7 +224,7 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
         throw new Error(data?.error || "Failed to edit message");
       }
     } catch (e) {
-      alert(messageOf(e));
+      toast(messageOf(e));
     }
   };
 
@@ -239,7 +240,7 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
       });
       if (!res.ok) throw new Error("Failed to rename session");
     } catch (e) {
-      alert(messageOf(e));
+      toast(messageOf(e));
     }
   };
 
@@ -254,7 +255,7 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
       if (!res.ok) throw new Error("Failed to resume session");
       resumedRef.current = true;
     } catch (err) {
-      alert(messageOf(err));
+      toast(messageOf(err));
     }
   };
 
@@ -295,7 +296,7 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
           router.push(`/${encodeURIComponent(today)}?${params.toString()}`);
         }
       } catch (err) {
-        alert(messageOf(err));
+        toast(messageOf(err));
       }
       return;
     }
@@ -315,13 +316,19 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
         throw new Error(errMsg);
       }
     } catch (err) {
-      alert(messageOf(err));
+      toast(messageOf(err));
     } finally {
       setIsThinking(false);
     }
   };
 
-  const formatDate = (d: string) => new Date(d).toLocaleString();
+  // Compaction and branch entries can arrive without a timestamp; showing
+  // nothing beats showing "Invalid Date".
+  const formatDate = (d?: string) => {
+    if (!d) return "";
+    const date = new Date(d);
+    return isNaN(date.getTime()) ? "" : date.toLocaleString();
+  };
 
   const sessionTitle = sessionDetail
     ? (sessionDetail.name || sessionDetail.preview || "Untitled Session")
