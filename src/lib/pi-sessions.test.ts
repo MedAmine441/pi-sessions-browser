@@ -126,6 +126,7 @@ describe("Pi session storage", () => {
       name: null,
       cwd: "/work",
       createdAt: "2026-01-01T10:00:00.000Z",
+      preview: "Hello [image]",
       items: [
         {
           id: "user-1",
@@ -148,6 +149,38 @@ describe("Pi session storage", () => {
         },
       ],
     });
+  });
+
+  it("renames sessions in Pi's own session_info format", async () => {
+    const file = await writeSession("project/renamed.jsonl", [
+      {
+        type: "session",
+        id: "renamed",
+        cwd: "/work",
+        timestamp: "2026-01-01T10:00:00.000Z",
+      },
+      {
+        type: "message",
+        id: "msg-1",
+        parentId: null,
+        timestamp: "2026-01-01T10:01:00.000Z",
+        message: { role: "user", content: "Hello" },
+      },
+    ]);
+
+    await sessions.renameSession(file, "  A new\nname  ");
+
+    const raw = await fs.readFile(file, "utf8");
+    const appended = JSON.parse(raw.trim().split("\n").at(-1)!);
+    expect(appended).toMatchObject({
+      type: "session_info",
+      parentId: "msg-1",
+      name: "A new name",
+    });
+    expect(appended.id).toMatch(/^[0-9a-f-]{8}$/);
+
+    const [listed] = await sessions.listSessions();
+    expect(listed.name).toBe("A new name");
   });
 
   it("only accepts JSONL files contained in the configured session directory", async () => {

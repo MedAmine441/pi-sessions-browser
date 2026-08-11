@@ -89,9 +89,21 @@ async function load(file: string) {
   return { stat, entries };
 }
 
+/**
+ * Pi names sessions with session_info entries; the latest one wins and an
+ * empty name clears the title. Earlier versions of this browser wrote "name"
+ * entries instead, so those still count.
+ */
+function nameFrom(entries: any[]) {
+  const entry = entries.findLast(
+    (entry) => entry.type === "session_info" || entry.type === "name",
+  );
+  return entry?.name?.trim() || null;
+}
+
 function summarize(file: string, stat: any, entries: any[]) {
   const header = entries.find((entry) => entry.type === "session") || {};
-  const name = entries.findLast((entry) => entry.type === "name")?.name;
+  const name = nameFrom(entries);
   const messages = entries.filter((entry) => entry.type === "message");
   const firstUser = messages.find((entry) => entry.message?.role === "user");
   const last = entries.at(-1);
@@ -367,7 +379,7 @@ export async function listSessions(targetDate?: string, location?: string) {
 export async function getConversation(file: string) {
   const { entries } = await load(file);
   const header = entries.find((entry) => entry.type === "session") || {};
-  const name = entries.findLast((entry) => entry.type === "name")?.name;
+  const name = nameFrom(entries);
   const items = [];
   for (const entry of entries) {
     if (entry.type === "message") {
@@ -585,11 +597,28 @@ export async function createNewSessionFile(targetCwd?: string) {
 }
 
 export async function renameSession(file: string, newName: string) {
+  // Matches Pi's own session_info entries: an 8-char id chained to the current
+  // leaf via parentId, with newlines stripped from the name. Anything else is
+  // invisible to Pi when it resumes the session.
+  const { entries } = await load(file);
+  const ids = new Set(entries.map((entry) => entry.id));
+  let id: string = randomUUID();
+  for (let i = 0; i < 100; i++) {
+    const candidate = randomUUID().slice(0, 8);
+    if (!ids.has(candidate)) {
+      id = candidate;
+      break;
+    }
+  }
+  const leaf = entries.findLast(
+    (entry) => entry.type !== "session" && entry.id,
+  );
   const entry = {
-    type: "name",
-    id: randomUUID(),
-    name: newName,
+    type: "session_info",
+    id,
+    parentId: leaf?.id ?? null,
     timestamp: new Date().toISOString(),
+    name: newName.replace(/[\r\n]+/g, " ").trim(),
   };
   await fs.appendFile(file, JSON.stringify(entry) + "\n", "utf-8");
 }
