@@ -61,17 +61,16 @@ function AssistantParts({
   return (
     <>
       {m.parts.map((part, i) =>
+        // "Hide tool calls" hides everything a reader skims past: the
+        // reasoning and the tool machinery, keeping only prose and images.
         part.type === "thinking" ? (
-          <ThinkingBlock key={i} thinking={part.thinking} />
+          hideToolCalls ? null : <ThinkingBlock key={i} thinking={part.thinking} />
         ) : part.type === "text" ? (
           <Markdown key={i} text={part.text} />
         ) : part.type === "toolCall" ? (
-          <ToolCallBlock
-            key={i}
-            part={part}
-            result={resultFor(part.id)}
-            compact={hideToolCalls}
-          />
+          hideToolCalls ? null : (
+            <ToolCallBlock key={i} part={part} result={resultFor(part.id)} />
+          )
         ) : part.type === "image" ? (
           <ImagePart key={i} data={part.data} mimeType={part.mimeType} />
         ) : null,
@@ -79,6 +78,15 @@ function AssistantParts({
     </>
   );
 }
+
+/** Whether a message would still show something once tool noise is hidden. */
+const hasReadableContent = (m: Message) =>
+  m.parts
+    ? m.parts.some(
+        (part) =>
+          (part.type === "text" && part.text.trim()) || part.type === "image",
+      )
+    : Boolean(m.text.trim());
 
 function MessageItem({
   m,
@@ -700,8 +708,13 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
   const visibleItems = useMemo(
     () =>
       (sessionDetail?.items || []).filter((m) => {
-        if (m.role !== "toolResult") return true;
-        return !pairedResultIds.has(m.id) && !hideToolCalls;
+        if (m.role === "toolResult")
+          return !pairedResultIds.has(m.id) && !hideToolCalls;
+        // With tool noise hidden, an assistant turn that only called tools
+        // or only thought would render as an empty shell — drop it whole.
+        if (hideToolCalls && m.role === "assistant")
+          return hasReadableContent(m) || Boolean(m.errorMessage);
+        return true;
       }),
     [sessionDetail?.items, pairedResultIds, hideToolCalls],
   );
@@ -907,7 +920,10 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
               </Button>
             </div>
             <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 text-xs font-semibold text-stone-400 uppercase tracking-widest cursor-pointer hover:text-white transition-colors">
+              <label
+                title="Hide tool calls, tool results, thinking, and turns that contain nothing else"
+                className="flex items-center gap-2 text-xs font-semibold text-stone-400 uppercase tracking-widest cursor-pointer hover:text-white transition-colors"
+              >
                 <input
                   type="checkbox"
                   checked={hideToolCalls}

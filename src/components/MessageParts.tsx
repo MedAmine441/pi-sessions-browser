@@ -144,17 +144,14 @@ function resultText(result: Message) {
 
 /**
  * A tool call from an assistant message, paired with its result when one has
- * arrived. `compact` (the "hide tool calls" toggle) reduces it to a one-line
- * chip.
+ * arrived. The "hide tool calls" toggle removes these entirely.
  */
 export function ToolCallBlock({
   part,
   result,
-  compact,
 }: {
   part: ToolCallPart;
   result?: Message;
-  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const name = part.name || "tool";
@@ -181,20 +178,6 @@ export function ToolCallBlock({
       )}
     </>
   );
-
-  if (compact) {
-    return (
-      <div
-        className={`my-1.5 flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[11px] uppercase tracking-widest ${
-          failed
-            ? "border-red-500/30 bg-red-950/20 text-red-300"
-            : "border-white/10 bg-black/20 text-stone-400"
-        }`}
-      >
-        {header}
-      </div>
-    );
-  }
 
   const diff =
     name === "edit"
