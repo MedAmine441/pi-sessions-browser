@@ -12,7 +12,15 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "dist/**",
   ]),
+  {
+    // The Electron entry points are intentionally CommonJS.
+    files: ["main.js", "server-watchdog.js", "create_fake_sessions.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

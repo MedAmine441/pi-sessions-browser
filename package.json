@@ -33,6 +33,10 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "server-watchdog.js",
+        "to": "server-watchdog.js"
       }
     ],
     "linux": {
