@@ -26,6 +26,20 @@ import {
   ToolCallBlock,
 } from "@/components/MessageParts";
 
+/** The slash commands this chat input handles itself, for autocomplete. */
+const LOCAL_COMMANDS = [
+  { cmd: "/fork", desc: "Copy the whole session and continue in the copy" },
+  { cmd: "/clone", desc: "Copy only the active branch into a new session" },
+  { cmd: "/tree", desc: "Show the session tree" },
+  { cmd: "/share", desc: "Share as a secret gist" },
+  { cmd: "/export", desc: "Download as HTML" },
+  { cmd: "/compact", args: "[instructions]", desc: "Summarize older context" },
+  { cmd: "/model", desc: "Change the session model" },
+  { cmd: "/name", args: "[new name]", desc: "Rename the session" },
+  { cmd: "/new", desc: "Start a new session in this folder" },
+  { cmd: "/quit", desc: "Close this chat" },
+] as const;
+
 /** What the edit box should hold: the message's first text part. */
 const editableTextOf = (m: Message) =>
   m.parts?.find((part) => part.type === "text")?.text ?? m.text;
@@ -327,6 +341,10 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [findAt, setFindAt] = useState(0);
+  const [cmdAt, setCmdAt] = useState(0);
+  const [cmdDismissed, setCmdDismissed] = useState(false);
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
+  const chatFormRef = useRef<HTMLFormElement>(null);
 
   // Model catalog, for the context-window size of the session's model.
   const [piModels, setPiModels] = useState<PiState["models"] | null>(null);
@@ -774,6 +792,70 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
     setFindAt((matchAt + delta + matchIds.length) % matchIds.length);
   };
 
+  // Slash-command autocomplete: live while the input is a single "/word".
+  const cmdSuggestions = useMemo(() => {
+    if (cmdDismissed) return [];
+    const value = chatInput;
+    if (!value.startsWith("/") || /[\s\n]/.test(value)) return [];
+    return LOCAL_COMMANDS.filter((c) => c.cmd.startsWith(value));
+  }, [chatInput, cmdDismissed]);
+  const cmdIndex = Math.min(cmdAt, Math.max(0, cmdSuggestions.length - 1));
+
+  /** Complete to the highlighted command; arg commands get a ready space. */
+  const completeCommand = () => {
+    const suggestion = cmdSuggestions[cmdIndex];
+    if (!suggestion) return;
+    setChatInput(suggestion.cmd + ("args" in suggestion && suggestion.args ? " " : ""));
+    setCmdAt(0);
+  };
+
+  // The textarea grows with its content, up to a few lines.
+  useEffect(() => {
+    const el = chatInputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [chatInput]);
+
+  const onChatInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (cmdSuggestions.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setCmdAt(Math.min(cmdIndex + 1, cmdSuggestions.length - 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setCmdAt(Math.max(cmdIndex - 1, 0));
+        return;
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        completeCommand();
+        return;
+      }
+      if (e.key === "Escape") {
+        // Dismiss the menu only — not the whole modal.
+        e.stopPropagation();
+        setCmdDismissed(true);
+        return;
+      }
+      if (
+        e.key === "Enter" &&
+        !e.shiftKey &&
+        cmdSuggestions[cmdIndex]?.cmd !== chatInput.trim()
+      ) {
+        e.preventDefault();
+        completeCommand();
+        return;
+      }
+    }
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      chatFormRef.current?.requestSubmit();
+    }
+  };
+
   const sessionTitle = sessionDetail
     ? (sessionDetail.name || sessionDetail.preview || "Untitled Session")
     : "Initializing Session...";
@@ -1091,15 +1173,62 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
               This session&apos;s file is gone or can no longer be streamed.
             </div>
           )}
-          <form onSubmit={handleSendMessage} className="flex gap-3 relative">
-            <input
-              type="text"
+          <form ref={chatFormRef} onSubmit={handleSendMessage} className="flex gap-3 relative">
+            {cmdSuggestions.length > 0 && (
+              <div className="absolute bottom-full left-0 right-0 z-10 mb-2 overflow-hidden rounded-2xl border border-white/10 bg-stone-950/95 shadow-xl backdrop-blur-xl">
+                <ul role="listbox" aria-label="Slash commands">
+                  {cmdSuggestions.map((suggestion, index) => (
+                    <li key={suggestion.cmd} role="option" aria-selected={index === cmdIndex}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCmdAt(index);
+                          setChatInput(
+                            suggestion.cmd +
+                              ("args" in suggestion && suggestion.args ? " " : ""),
+                          );
+                          chatInputRef.current?.focus();
+                        }}
+                        onMouseMove={() => setCmdAt(index)}
+                        className={`flex w-full items-baseline gap-3 px-4 py-2 text-left text-sm ${
+                          index === cmdIndex
+                            ? "bg-amber-500/15 text-white"
+                            : "text-stone-300 hover:bg-white/5"
+                        }`}
+                      >
+                        <span className="font-mono font-bold">
+                          {suggestion.cmd}
+                          {"args" in suggestion && suggestion.args ? (
+                            <span className="ml-1 font-normal text-stone-500">
+                              {suggestion.args}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-xs text-stone-500">
+                          {suggestion.desc}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <div className="border-t border-white/10 px-4 py-1.5 font-mono text-[10px] text-stone-600">
+                  tab complete · ↵ run · esc dismiss
+                </div>
+              </div>
+            )}
+            <textarea
+              ref={chatInputRef}
+              rows={1}
               value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
+              onChange={(e) => {
+                setChatInput(e.target.value);
+                setCmdDismissed(false);
+              }}
+              onKeyDown={onChatInputKeyDown}
               disabled={sessionGone}
-              placeholder="Send a message to this session..."
+              placeholder="Send a message… ( / for commands, Shift+Enter for a new line )"
               aria-label="Message to send to this session"
-              className="flex-1 bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-stone-200 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 shadow-inner placeholder-stone-500 transition-all disabled:opacity-50"
+              className="custom-scrollbar flex-1 resize-none bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-stone-200 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 shadow-inner placeholder-stone-500 transition-all disabled:opacity-50"
             />
             <Button
               type="submit"
