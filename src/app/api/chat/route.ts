@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { messageOf } from "@/lib/utils";
 import { sendChatMessage, safeSessionPath } from "@/lib/pi-sessions";
 
 export async function POST(request: Request) {
@@ -10,11 +11,11 @@ export async function POST(request: Request) {
     await sendChatMessage(safePath, message);
     
     return NextResponse.json({ success: true }, { status: 202 });
-  } catch (error: any) {
+  } catch (error) {
     // Pi failing (usage limits, a bad key, a crash) is an outcome to report,
     // not a fault in this server, so it is logged as one line rather than a
     // stack trace that reads like the app fell over.
-    console.warn(`Chat message not sent: ${error.message}`);
-    return NextResponse.json({ error: error.message || "Failed to send chat message" }, { status: 500 });
+    console.warn(`Chat message not sent: ${messageOf(error)}`);
+    return NextResponse.json({ error: messageOf(error) || "Failed to send chat message" }, { status: 500 });
   }
 }

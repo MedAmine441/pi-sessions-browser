@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { messageOf } from "@/lib/utils";
 import { getLocations, getDefaultLocation } from "@/lib/pi-sessions";
 
 export async function GET() {
@@ -6,8 +7,8 @@ export async function GET() {
     const locations = await getLocations();
     const defaultLocation = getDefaultLocation();
     return NextResponse.json({ locations, defaultLocation });
-  } catch (error: any) {
+  } catch (error) {
     console.error(error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: messageOf(error) }, { status: 500 });
   }
 }

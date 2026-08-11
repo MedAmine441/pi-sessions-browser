@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { messageOf } from "@/lib/utils";
 import { listDirectories } from "@/lib/pi-sessions";
 
 export async function GET(request: Request) {
@@ -6,10 +7,10 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const path = searchParams.get("path") || undefined;
     return NextResponse.json(await listDirectories(path));
-  } catch (error: any) {
+  } catch (error) {
     console.error(error);
     return NextResponse.json(
-      { error: error.message || "Failed to read that folder" },
+      { error: messageOf(error) || "Failed to read that folder" },
       { status: 500 },
     );
   }

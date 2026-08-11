@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { messageOf } from "@/lib/utils";
 import { renameSession, safeSessionPath } from "@/lib/pi-sessions";
 
 export async function POST(request: Request) {
@@ -10,8 +11,8 @@ export async function POST(request: Request) {
     await renameSession(safePath, name);
     
     return NextResponse.json({ success: true });
-  } catch (error: any) {
+  } catch (error) {
     console.error(error);
-    return NextResponse.json({ error: error.message || "Failed to rename session" }, { status: 500 });
+    return NextResponse.json({ error: messageOf(error) || "Failed to rename session" }, { status: 500 });
   }
 }

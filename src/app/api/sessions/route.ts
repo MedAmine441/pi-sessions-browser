@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { messageOf } from "@/lib/utils";
 import { listSessions, safeSessionPath, deleteSession } from "@/lib/pi-sessions";
 
 export async function GET(request: Request) {
@@ -8,9 +9,9 @@ export async function GET(request: Request) {
     const location = searchParams.get("location") || undefined;
     const sessions = await listSessions(date, location);
     return NextResponse.json(sessions);
-  } catch (error: any) {
+  } catch (error) {
     console.error(error);
-    return NextResponse.json({ error: error.message || "Failed to list sessions" }, { status: 500 });
+    return NextResponse.json({ error: messageOf(error) || "Failed to list sessions" }, { status: 500 });
   }
 }
 
@@ -23,8 +24,8 @@ export async function DELETE(request: Request) {
     const safePath = await safeSessionPath(file);
     await deleteSession(safePath);
     return NextResponse.json({ success: true });
-  } catch (error: any) {
+  } catch (error) {
     console.error(error);
-    return NextResponse.json({ error: error.message || "Failed to delete session" }, { status: 500 });
+    return NextResponse.json({ error: messageOf(error) || "Failed to delete session" }, { status: 500 });
   }
 }

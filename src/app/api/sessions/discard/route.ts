@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { messageOf } from "@/lib/utils";
 import { discardIfEmpty, safeSessionPath } from "@/lib/pi-sessions";
 
 export async function POST(request: Request) {
@@ -9,10 +10,10 @@ export async function POST(request: Request) {
 
     const safePath = await safeSessionPath(body.file);
     return NextResponse.json({ discarded: await discardIfEmpty(safePath) });
-  } catch (error: any) {
+  } catch (error) {
     console.error(error);
     return NextResponse.json(
-      { error: error.message || "Failed to discard session" },
+      { error: messageOf(error) || "Failed to discard session" },
       { status: 500 },
     );
   }

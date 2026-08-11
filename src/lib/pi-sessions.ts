@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, type Stats } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
@@ -19,10 +19,34 @@ export const maxSessionBytes =
     : 100 * 1024 * 1024;
 let canonicalRoot: string;
 
-function textFrom(content: any): string {
+/**
+ * One parsed JSONL line. The format is Pi's; only the fields this browser
+ * reads are typed, and every one is optional because any line can be
+ * anything.
+ */
+type SessionEntry = {
+  type?: string;
+  id?: string;
+  parentId?: string | null;
+  timestamp?: string;
+  name?: string;
+  summary?: string;
+  cwd?: string;
+  message?: {
+    role?: string;
+    content?: unknown;
+    timestamp?: string;
+    toolName?: string;
+    display?: boolean;
+  };
+};
+
+type ContentPart = { type?: string; text?: string; name?: string };
+
+function textFrom(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
-  return content
+  return (content as ContentPart[])
     .map((part) => {
       if (part?.type === "text") return part.text || "";
       if (part?.type === "thinking") return "[thinking]";
@@ -76,7 +100,7 @@ export async function safeSessionPath(candidate: string | null) {
 }
 
 export function parseEntries(raw: string) {
-  const entries = [];
+  const entries: SessionEntry[] = [];
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
     try {
@@ -104,13 +128,13 @@ async function load(file: string) {
  * session_info entries; earlier versions of this browser wrote "name"
  * entries instead, so those still count.
  */
-export function nameFromEntry(entry: any): string | null | undefined {
+export function nameFromEntry(entry: SessionEntry): string | null | undefined {
   if (entry.type !== "session_info" && entry.type !== "name") return undefined;
   return entry.name?.trim() || null;
 }
 
 /** The latest name-bearing entry wins; an empty name clears the title. */
-function nameFrom(entries: any[]) {
+function nameFrom(entries: SessionEntry[]) {
   for (let i = entries.length - 1; i >= 0; i--) {
     const name = nameFromEntry(entries[i]);
     if (name !== undefined) return name;
@@ -118,7 +142,7 @@ function nameFrom(entries: any[]) {
   return null;
 }
 
-function summarize(file: string, stat: any, entries: any[]) {
+function summarize(file: string, stat: Stats, entries: SessionEntry[]) {
   const header = entries.find((entry) => entry.type === "session") || {};
   const name = nameFrom(entries);
   const messages = entries.filter((entry) => entry.type === "message");
@@ -314,8 +338,9 @@ async function locationIndex() {
   let entries;
   try {
     entries = await fs.readdir(canonicalRoot, { withFileTypes: true });
-  } catch (error: any) {
-    if (error?.code === "ENOENT") return new Map<string, { dirs: string[]; used: boolean }>();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT")
+      return new Map<string, { dirs: string[]; used: boolean }>();
     throw error;
   }
 
@@ -390,8 +415,8 @@ async function collectFiles(location?: string) {
     }
     try {
       files.push(...(await walk(safeTarget)));
-    } catch (error: any) {
-      if (error?.code !== "ENOENT") throw error;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
     }
   }
   return files;
@@ -474,7 +499,7 @@ export async function listSessions(targetDate?: string, location?: string) {
 }
 
 /** Shapes one raw session entry into a renderable conversation item. */
-export function conversationItemFromEntry(entry: any) {
+export function conversationItemFromEntry(entry: SessionEntry) {
   if (entry.type === "message") {
     const message = entry.message || {};
     if (message.role === "custom" && !message.display) return null;
@@ -505,7 +530,7 @@ export function conversationItemFromEntry(entry: any) {
   return null;
 }
 
-export function conversationFromEntries(file: string, entries: any[]) {
+export function conversationFromEntries(file: string, entries: SessionEntry[]) {
   const header = entries.find((entry) => entry.type === "session") || {};
   const name = nameFrom(entries);
   const items = [];
@@ -755,7 +780,7 @@ export async function editMessage(
           parsed.message.content = newText;
         } else {
           const textItem = Array.isArray(messageContent)
-            ? messageContent.find((c: unknown) => (c as any)?.type === "text")
+            ? (messageContent as ContentPart[]).find((c) => c?.type === "text")
             : null;
           if (!textItem)
             throw new SessionEditError(
