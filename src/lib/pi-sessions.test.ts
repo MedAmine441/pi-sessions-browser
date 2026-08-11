@@ -134,6 +134,8 @@ describe("Pi session storage", () => {
           timestamp: "2026-01-01T10:01:00.000Z",
           role: "user",
           text: "Hello\n[image]",
+          // The dataless image part is dropped; only renderable parts ride.
+          parts: [{ type: "text", text: "Hello" }],
           toolName: undefined,
         },
         {
@@ -150,6 +152,122 @@ describe("Pi session storage", () => {
         },
       ],
     });
+  });
+
+  it("surfaces structured parts, usage, errors, and bash runs on conversation items", async () => {
+    const usage = {
+      input: 2100,
+      output: 520,
+      cacheRead: 1800,
+      cacheWrite: 0,
+      totalTokens: 4420,
+      cost: { input: 0.0042, output: 0.0052, cacheRead: 0.00036, cacheWrite: 0, total: 0.00976 },
+    };
+    const file = await writeSession("project/rich.jsonl", [
+      {
+        type: "session",
+        id: "rich",
+        cwd: "/work",
+        timestamp: "2026-01-01T10:00:00.000Z",
+      },
+      {
+        type: "message",
+        id: "ask",
+        timestamp: "2026-01-01T10:01:00.000Z",
+        message: { role: "user", content: "Run it" },
+      },
+      {
+        type: "message",
+        id: "reply",
+        timestamp: "2026-01-01T10:02:00.000Z",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "Look before running.", thinkingSignature: "sig" },
+            { type: "text", text: "Running now." },
+            { type: "toolCall", id: "call_1", name: "bash", arguments: { command: "ls" } },
+          ],
+          provider: "anthropic",
+          model: "claude-opus-4-6",
+          usage,
+          stopReason: "error",
+          errorMessage: "overloaded",
+        },
+      },
+      {
+        type: "message",
+        id: "result",
+        timestamp: "2026-01-01T10:03:00.000Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "call_1",
+          toolName: "bash",
+          content: [{ type: "text", text: "ls: boom" }],
+          isError: true,
+        },
+      },
+      {
+        type: "message",
+        id: "bash",
+        timestamp: "2026-01-01T10:04:00.000Z",
+        message: {
+          role: "bashExecution",
+          command: "echo hi",
+          output: "hi",
+          exitCode: 0,
+          cancelled: false,
+          truncated: false,
+        },
+      },
+      {
+        type: "compaction",
+        id: "squeeze",
+        timestamp: "2026-01-01T10:05:00.000Z",
+        summary: "Older context squeezed",
+        tokensBefore: 50000,
+        usage: { cost: { total: 0.001 } },
+      },
+    ]);
+
+    const conversation = await sessions.getConversation(file);
+    const byId = Object.fromEntries(conversation.items.map((i) => [i.id, i]));
+
+    expect(byId.reply).toMatchObject({
+      role: "assistant",
+      parts: [
+        { type: "thinking", thinking: "Look before running." },
+        { type: "text", text: "Running now." },
+        { type: "toolCall", id: "call_1", name: "bash", arguments: { command: "ls" } },
+      ],
+      usage: { input: 2100, output: 520, totalTokens: 4420, cost: { total: 0.00976 } },
+      model: "claude-opus-4-6",
+      stopReason: "error",
+      errorMessage: "overloaded",
+    });
+    expect(byId.result).toMatchObject({
+      role: "toolResult",
+      toolCallId: "call_1",
+      isError: true,
+      text: "ls: boom",
+    });
+    expect(byId.bash).toMatchObject({
+      role: "bashExecution",
+      text: "$ echo hi",
+      command: "echo hi",
+      output: "hi",
+      exitCode: 0,
+    });
+    expect(byId.squeeze).toMatchObject({
+      role: "summary",
+      tokensBefore: 50000,
+      usage: { cost: { total: 0.001 } },
+    });
+
+    // The summary rolls cost up from every usage-bearing entry and flags the
+    // assistant error for the session card.
+    const [listed] = await sessions.listSessions();
+    expect(listed.cost).toBeCloseTo(0.01076, 10);
+    expect(listed.hasError).toBe(true);
   });
 
   it("parses the UTC timestamp out of session filenames", () => {
@@ -485,6 +603,92 @@ describe("Pi session storage", () => {
       "answer",
       "branchB",
     ]);
+  });
+
+  it("groups sessions by their header cwd, not the lossy directory name", async () => {
+    // /work/cosmic-text and /work/cosmic/text encode to the same directory
+    // name, so they can end up sharing one folder on disk.
+    const shared = "--work-cosmic-text--";
+    await writeSession(`${shared}/a.jsonl`, [
+      {
+        type: "session",
+        id: "dashed",
+        cwd: "/work/cosmic-text",
+        timestamp: "2026-03-05T12:00:00.000Z",
+      },
+      {
+        type: "message",
+        id: "m1",
+        timestamp: "2026-03-05T12:01:00.000Z",
+        message: { role: "user", content: "in the dashed folder" },
+      },
+    ]);
+    await writeSession(`${shared}/b.jsonl`, [
+      {
+        type: "session",
+        id: "nested",
+        cwd: "/work/cosmic/text",
+        timestamp: "2026-03-05T13:00:00.000Z",
+      },
+      {
+        type: "message",
+        id: "m2",
+        timestamp: "2026-03-05T13:01:00.000Z",
+        message: { role: "user", content: "in the nested folder" },
+      },
+    ]);
+    // A legacy directory-name variant of the same cwd merges into it.
+    await writeSession("--work-cosmic-text/c.jsonl", [
+      {
+        type: "session",
+        id: "variant",
+        cwd: "/work/cosmic-text",
+        timestamp: "2026-03-05T14:00:00.000Z",
+      },
+      {
+        type: "message",
+        id: "m3",
+        timestamp: "2026-03-05T14:01:00.000Z",
+        message: { role: "user", content: "legacy dir name" },
+      },
+    ]);
+
+    await expect(sessions.getLocations()).resolves.toEqual([
+      "/work/cosmic-text",
+      "/work/cosmic/text",
+    ]);
+    const dashed = await sessions.listSessions(undefined, "/work/cosmic-text");
+    expect(dashed.map((s) => s.id).sort()).toEqual(["dashed", "variant"]);
+    const nested = await sessions.listSessions(undefined, "/work/cosmic/text");
+    expect(nested.map((s) => s.id)).toEqual(["nested"]);
+  });
+
+  it("decodes headerless directory names against the real filesystem, dashes intact", async () => {
+    const base = await fs.mkdtemp(join(tmpdir(), "pi-decode-"));
+    try {
+      await fs.mkdir(join(base, "cosmic-text"));
+      await fs.mkdir(join(base, "--"));
+      const encode = (p: string) => `--${p.slice(1).replace(/\//g, "-")}--`;
+      const message = {
+        type: "message",
+        id: "m1",
+        timestamp: "2026-03-05T12:00:00.000Z",
+        message: { role: "user", content: "hi" },
+      };
+
+      // No cwd in any header: the directory name is all there is to go on.
+      await writeSession(`${encode(join(base, "cosmic-text"))}/a.jsonl`, [message]);
+      await writeSession(`${encode(join(base, "--"))}/b.jsonl`, [message]);
+      // A path that no longer exists keeps its tail as one dashed segment.
+      await writeSession(`${encode(join(base, "deleted-project"))}/c.jsonl`, [message]);
+
+      const locations = await sessions.getLocations();
+      expect(locations).toContain(join(base, "cosmic-text"));
+      expect(locations).toContain(join(base, "--"));
+      expect(locations).toContain(join(base, "deleted-project"));
+    } finally {
+      await fs.rm(base, { recursive: true, force: true });
+    }
   });
 
   it("only accepts JSONL files contained in the configured session directory", async () => {

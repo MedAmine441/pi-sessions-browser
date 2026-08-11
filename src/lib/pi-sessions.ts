@@ -4,7 +4,7 @@ import { basename, dirname, extname, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { localDateKey } from "./utils";
-import type { SessionTreeNode } from "@/types";
+import type { MessagePart, SessionTreeNode, Usage } from "@/types";
 
 const sessionRoot = resolve(
   process.env.PI_SESSION_DIR || `${homedir()}/.pi/agent/sessions`,
@@ -36,16 +36,41 @@ type SessionEntry = {
   version?: number;
   targetId?: string;
   label?: string;
+  /** compaction and branch_summary carry usage/tokensBefore on the entry. */
+  usage?: unknown;
+  tokensBefore?: number;
   message?: {
     role?: string;
     content?: unknown;
     timestamp?: string;
     toolName?: string;
+    toolCallId?: string;
+    isError?: boolean;
+    details?: unknown;
     display?: boolean;
+    model?: string;
+    provider?: string;
+    usage?: unknown;
+    stopReason?: string;
+    errorMessage?: string;
+    command?: string;
+    output?: string;
+    exitCode?: number | null;
+    cancelled?: boolean;
+    truncated?: boolean;
   };
 };
 
-type ContentPart = { type?: string; text?: string; name?: string };
+type ContentPart = {
+  type?: string;
+  text?: string;
+  name?: string;
+  thinking?: string;
+  id?: string;
+  arguments?: unknown;
+  data?: string;
+  mimeType?: string;
+};
 
 function textFrom(content: unknown): string {
   if (typeof content === "string") return content;
@@ -60,6 +85,54 @@ function textFrom(content: unknown): string {
     })
     .filter(Boolean)
     .join("\n");
+}
+
+/** The structured counterpart of textFrom — what the chat view renders. */
+function partsFrom(content: unknown): MessagePart[] | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const parts: MessagePart[] = [];
+  for (const raw of content as ContentPart[]) {
+    if (raw?.type === "text" && typeof raw.text === "string")
+      parts.push({ type: "text", text: raw.text });
+    else if (raw?.type === "thinking" && typeof raw.thinking === "string")
+      parts.push({ type: "thinking", thinking: raw.thinking });
+    else if (raw?.type === "toolCall")
+      parts.push({
+        type: "toolCall",
+        id: raw.id,
+        name: raw.name,
+        arguments:
+          raw.arguments && typeof raw.arguments === "object"
+            ? (raw.arguments as Record<string, unknown>)
+            : undefined,
+      });
+    else if (raw?.type === "image" && typeof raw.data === "string")
+      parts.push({ type: "image", data: raw.data, mimeType: raw.mimeType });
+  }
+  return parts;
+}
+
+/** Passes usage through with every field checked — any line can be anything. */
+function usageFrom(raw: unknown): Usage | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const source = raw as Record<string, unknown>;
+  const num = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  const total =
+    source.cost && typeof source.cost === "object"
+      ? num((source.cost as Record<string, unknown>).total)
+      : undefined;
+  const usage: Usage = {
+    input: num(source.input),
+    output: num(source.output),
+    cacheRead: num(source.cacheRead),
+    cacheWrite: num(source.cacheWrite),
+    totalTokens: num(source.totalTokens),
+    ...(total !== undefined ? { cost: { total } } : {}),
+  };
+  return Object.values(usage).some((value) => value !== undefined)
+    ? usage
+    : undefined;
 }
 
 function short(value: string, limit = 220) {
@@ -152,6 +225,23 @@ function summarize(file: string, stat: Stats, entries: SessionEntry[]) {
   const messages = entries.filter((entry) => entry.type === "message");
   const firstUser = messages.find((entry) => entry.message?.role === "user");
   const last = entries.at(-1);
+
+  // Dollar cost accumulates from every usage-bearing entry: assistant turns,
+  // tool-nested LLM work, compaction and branch summaries alike.
+  let cost = 0;
+  let hasError = false;
+  for (const entry of entries) {
+    const usage = usageFrom(
+      entry.type === "message" ? entry.message?.usage : entry.usage,
+    );
+    if (usage?.cost?.total) cost += usage.cost.total;
+    if (
+      entry.message?.role === "assistant" &&
+      (entry.message.stopReason === "error" || entry.message.errorMessage)
+    )
+      hasError = true;
+  }
+
   return {
     file,
     id: header.id || basename(file).replace(/\.jsonl$/, ""),
@@ -162,22 +252,32 @@ function summarize(file: string, stat: Stats, entries: SessionEntry[]) {
     messageCount: messages.length,
     preview: short(textFrom(firstUser?.message?.content) || "No user message"),
     size: stat.size,
+    cost,
+    hasError,
   };
 }
 
-/** Pi encodes a session's cwd as its directory name: /home/pc -> --home-pc-- */
+/**
+ * Pi encodes a session's cwd as its directory name: /home/pc -> --home-pc--.
+ * Mirrors pi's own scheme exactly (session-manager.ts): only the first
+ * leading separator is dropped, and "\" and ":" collapse to "-" too.
+ */
 function encodeCwd(cwd: string) {
-  return `--${cwd.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\//g, "-")}--`;
+  return `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
 }
 
 /**
  * The encoding is lossy — a "-" in a folder name is indistinguishable from a
  * separator — so this walks the real filesystem, taking the longest segment
  * that exists at each step. Only used for directories with no session to read
- * the cwd from; a path that no longer exists degrades to the naive split.
+ * the cwd from. Only the literal "--" wrapper is stripped: a folder actually
+ * named "--" contributes empty split parts the walk can still resolve. A tail
+ * that no longer exists on disk is kept as one dash-joined segment — a
+ * deleted leaf folder whose name contains dashes (cosmic-text) is far more
+ * common than a deleted multi-level path.
  */
 async function decodeDirName(name: string) {
-  const parts = name.replace(/^-+/, "").replace(/-+$/, "").split("-");
+  const parts = name.replace(/^--/, "").replace(/--$/, "").split("-");
   let path = "";
   for (let i = 0; i < parts.length; ) {
     let matched = 0;
@@ -193,7 +293,7 @@ async function decodeDirName(name: string) {
         break;
       }
     }
-    if (!matched) return `${path}/${parts.slice(i).join("/")}`;
+    if (!matched) return `${path}/${parts.slice(i).join("-")}`;
     i = matched;
   }
   return path;
@@ -242,6 +342,7 @@ function cacheGet<T>(
 function dropFromCaches(file: string) {
   hasMessagesCache.delete(file);
   summaryCache.delete(file);
+  fileCwdCache.delete(file);
 }
 
 /** Promise.all with a cap on simultaneously open files. */
@@ -313,49 +414,74 @@ async function hasMessages(file: string) {
   }
 }
 
-async function inspectDir(name: string) {
-  const dir = resolve(canonicalRoot, name);
-  let sessions: string[] = [];
-  try {
-    sessions = (await fs.readdir(dir)).filter((f) => f.endsWith(".jsonl")).sort();
-  } catch {
-    /* Unreadable directories fall back to the decoded name. */
-  }
+/** Header cwds never change once written, so one read per file suffices. */
+const fileCwdCache = new Map<string, string>();
 
-  let cwd: string | null = null;
-  let used = false;
-  for (const session of sessions) {
-    const file = resolve(dir, session);
-    if (!cwd) cwd = await readSessionCwd(file);
-    if (!used) used = await hasMessages(file);
-    if (cwd && used) break;
-  }
-  return { cwd: cwd || (await decodeDirName(name)), used };
+async function cachedFileCwd(file: string) {
+  const known = fileCwdCache.get(file);
+  if (known !== undefined) return known;
+  const cwd = await readSessionCwd(file);
+  if (cwd) fileCwdCache.set(file, cwd);
+  return cwd;
 }
 
 /**
- * Directories are grouped by the real cwd they hold sessions for, so variants
- * of the same path (--home-pc and --home-pc--) show up as a single location.
+ * Sessions are grouped by the cwd each file's own header records — the
+ * directory name is only a lossy fallback (pi turns "/" into "-", so
+ * /a/b-c and /a/b/c share a directory). Grouping per file keeps sessions
+ * from colliding cwds apart, and still merges directory-name variants of
+ * the same path (--home-pc and --home-pc--) into a single location.
  */
 async function locationIndex() {
   await initCanonicalRoot();
-  let entries;
+  let dirents;
   try {
-    entries = await fs.readdir(canonicalRoot, { withFileTypes: true });
+    dirents = await fs.readdir(canonicalRoot, { withFileTypes: true });
   } catch (error) {
     if ((error as NodeJS.ErrnoException)?.code === "ENOENT")
-      return new Map<string, { dirs: string[]; used: boolean }>();
+      return new Map<string, { files: string[]; used: boolean }>();
     throw error;
   }
 
-  const names = entries.filter((e) => e.isDirectory()).map((e) => e.name);
-  const inspected = await Promise.all(names.map(inspectDir));
-  const index = new Map<string, { dirs: string[]; used: boolean }>();
-  names.forEach((name, i) => {
-    const { cwd, used } = inspected[i];
-    const entry = index.get(cwd) || { dirs: [], used: false };
-    index.set(cwd, { dirs: [...entry.dirs, name], used: entry.used || used });
+  const dirs = dirents.filter((e) => e.isDirectory()).map((e) => e.name);
+  const perDir = await Promise.all(
+    dirs.map((name) =>
+      walk(resolve(canonicalRoot, name)).catch(() => [] as string[]),
+    ),
+  );
+
+  // Decoding walks the filesystem, so each directory resolves at most once,
+  // and only when one of its files actually needs the fallback.
+  const decoded = new Map<string, Promise<string>>();
+  const pairs = dirs.flatMap((dir, i) => perDir[i].map((file) => ({ dir, file })));
+  const cwds = await mapLimit(pairs, 16, async ({ dir, file }) => {
+    const cwd = await cachedFileCwd(file);
+    if (cwd) return cwd;
+    let fallback = decoded.get(dir);
+    if (!fallback) {
+      fallback = decodeDirName(dir);
+      decoded.set(dir, fallback);
+    }
+    return fallback;
   });
+
+  const index = new Map<string, { files: string[]; used: boolean }>();
+  pairs.forEach(({ file }, i) => {
+    const entry = index.get(cwds[i]) || { files: [], used: false };
+    entry.files.push(file);
+    index.set(cwds[i], entry);
+  });
+
+  await Promise.all(
+    [...index.values()].map(async (entry) => {
+      for (const file of entry.files) {
+        if (await hasMessages(file)) {
+          entry.used = true;
+          break;
+        }
+      }
+    }),
+  );
   return index;
 }
 
@@ -396,34 +522,32 @@ export async function listDirectories(target?: string) {
 
 async function collectFiles(location?: string) {
   await initCanonicalRoot();
-  let targets = [canonicalRoot];
-  if (location) {
-    const index = await locationIndex();
-    // Older links carried the raw directory name rather than the cwd.
-    const dirs =
-      index.get(location)?.dirs ||
-      ([...index.values()].flatMap((entry) => entry.dirs).includes(location)
-        ? [location]
-        : []);
-    targets = dirs.map((dir) => resolve(canonicalRoot, dir));
-  }
-
-  const files: string[] = [];
-  for (const target of targets) {
-    const safeTarget = await fs.realpath(target).catch(() => null);
-    if (
-      !safeTarget ||
-      !(safeTarget === canonicalRoot || safeTarget.startsWith(`${canonicalRoot}${sep}`))
-    ) {
-      continue;
-    }
+  if (!location) {
     try {
-      files.push(...(await walk(safeTarget)));
+      return await walk(canonicalRoot);
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
+      return [];
     }
   }
-  return files;
+
+  const index = await locationIndex();
+  const entry = index.get(location);
+  if (entry) return entry.files;
+
+  // Older links carried the raw directory name rather than the cwd. Only an
+  // actual top-level session directory qualifies, resolved through realpath
+  // so a symlinked name cannot reach outside the root.
+  const names = await fs
+    .readdir(canonicalRoot, { withFileTypes: true })
+    .then((dirents) => dirents.filter((e) => e.isDirectory()).map((e) => e.name))
+    .catch(() => [] as string[]);
+  if (!names.includes(location)) return [];
+  const target = await fs
+    .realpath(resolve(canonicalRoot, location))
+    .catch(() => null);
+  if (!target || !target.startsWith(`${canonicalRoot}${sep}`)) return [];
+  return walk(target).catch(() => [] as string[]);
 }
 
 /** Session filenames start with a UTC stamp: 2026-08-09T19-28-48-916Z_uuid.jsonl */
@@ -507,12 +631,34 @@ export function conversationItemFromEntry(entry: SessionEntry) {
   if (entry.type === "message") {
     const message = entry.message || {};
     if (message.role === "custom" && !message.display) return null;
+    if (message.role === "bashExecution") {
+      // Bash runs carry the command itself instead of content parts.
+      return {
+        id: entry.id,
+        timestamp: entry.timestamp || message.timestamp,
+        role: "bashExecution",
+        text: message.command ? `$ ${message.command}` : "[bash]",
+        command: message.command,
+        output: message.output,
+        exitCode: message.exitCode,
+        cancelled: message.cancelled,
+        truncated: message.truncated,
+      };
+    }
     return {
       id: entry.id,
       timestamp: entry.timestamp || message.timestamp,
       role: message.role || "message",
       text: textFrom(message.content),
+      parts: partsFrom(message.content),
       toolName: message.toolName,
+      toolCallId: message.toolCallId,
+      isError: message.isError,
+      details: message.details,
+      usage: usageFrom(message.usage),
+      model: message.model,
+      stopReason: message.stopReason,
+      errorMessage: message.errorMessage,
     };
   }
   if (entry.type === "compaction") {
@@ -521,6 +667,8 @@ export function conversationItemFromEntry(entry: SessionEntry) {
       timestamp: entry.timestamp,
       role: "summary",
       text: entry.summary || "Conversation compacted",
+      tokensBefore: entry.tokensBefore,
+      usage: usageFrom(entry.usage),
     };
   }
   if (entry.type === "branch_summary") {
@@ -529,6 +677,7 @@ export function conversationItemFromEntry(entry: SessionEntry) {
       timestamp: entry.timestamp,
       role: "summary",
       text: entry.summary || "Branch summary",
+      usage: usageFrom(entry.usage),
     };
   }
   return null;

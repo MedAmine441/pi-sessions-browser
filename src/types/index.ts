@@ -8,14 +8,59 @@ export type SessionInfo = {
   messageCount: number;
   preview: string;
   size: number;
+  /** Summed usage.cost.total across every entry that carries usage. */
+  cost: number;
+  /** True when any assistant message ended in an error. */
+  hasError: boolean;
+};
+
+/** One typed content block of a message, in pi's own shapes. */
+export type MessagePart =
+  | { type: "text"; text: string }
+  | { type: "thinking"; thinking: string }
+  | {
+      type: "toolCall";
+      id?: string;
+      name?: string;
+      arguments?: Record<string, unknown>;
+    }
+  | { type: "image"; data: string; mimeType?: string };
+
+/** Token and dollar accounting pi stores on assistant messages. */
+export type Usage = {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  totalTokens?: number;
+  cost?: { total?: number };
 };
 
 export type Message = {
   id: string;
   role: string;
+  /** Flattened text with placeholders — previews and tree labels. */
   text: string;
+  /** Structured content when pi stored an array; the chat renders these. */
+  parts?: MessagePart[];
   timestamp?: string;
   toolName?: string;
+  toolCallId?: string;
+  isError?: boolean;
+  /** Tool-specific metadata, e.g. the edit tool's precomputed {diff}. */
+  details?: unknown;
+  usage?: Usage;
+  model?: string;
+  stopReason?: string;
+  errorMessage?: string;
+  /** bashExecution entries carry the run itself instead of content. */
+  command?: string;
+  output?: string;
+  exitCode?: number | null;
+  cancelled?: boolean;
+  truncated?: boolean;
+  /** Compaction entries: context size before the squeeze. */
+  tokensBefore?: number;
 };
 
 export type SessionModel = { provider: string; modelId: string };
