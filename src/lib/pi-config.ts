@@ -90,9 +90,20 @@ export type PiModel = {
   id: string;
   name?: string;
   reasoning?: boolean;
+  contextWindow?: number;
 };
 
-type ModelsStore = Record<string, { models?: { id: string; name?: string; reasoning?: boolean }[] }>;
+type ModelsStore = Record<
+  string,
+  {
+    models?: {
+      id: string;
+      name?: string;
+      reasoning?: boolean;
+      contextWindow?: number;
+    }[];
+  }
+>;
 type Settings = Record<string, unknown> & {
   defaultProvider?: string;
   defaultModel?: string;

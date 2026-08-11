@@ -3,8 +3,8 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw, Cpu, GitFork, FileDown, Archive, ListTree, Share2 } from "lucide-react";
-import { Message, SessionDetail, SessionModel } from "@/types";
-import { fetchJson, localDateKey, messageOf } from "@/lib/utils";
+import { Message, PiState, SessionDetail, SessionModel } from "@/types";
+import { fetchJson, formatCost, formatTokens, localDateKey, messageOf } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -146,6 +146,17 @@ function MessageItem({
             )}
           </div>
           <div className="flex items-center gap-3">
+            {m.role === "assistant" && m.usage && (
+              <div
+                className="text-[10px] text-stone-500 font-mono"
+                title={`input ${m.usage.input ?? "?"} · output ${m.usage.output ?? "?"} · cache read ${m.usage.cacheRead ?? 0} · cache write ${m.usage.cacheWrite ?? 0}`}
+              >
+                {m.usage.input !== undefined || m.usage.output !== undefined
+                  ? `${formatTokens(m.usage.input ?? 0)}→${formatTokens(m.usage.output ?? 0)}`
+                  : ""}
+                {m.usage.cost?.total ? ` · ${formatCost(m.usage.cost.total)}` : ""}
+              </div>
+            )}
             <div className="text-[10px] text-stone-500 font-mono">{formatDate(m.timestamp)}</div>
             {isTool && (
               /* Stretched toggle: the whole header row activates it, while staying a
@@ -212,6 +223,11 @@ function MessageItem({
           ) : (
             <PlainParts m={m} />
           )}
+          {m.role === "summary" && m.tokensBefore !== undefined && (
+            <div className="mt-1 font-mono text-[10px] not-italic text-stone-500">
+              compacted from {formatTokens(m.tokensBefore)} tokens
+            </div>
+          )}
           {isTool && !isOpen && (
             <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-stone-900/90 to-transparent pointer-events-none" aria-hidden="true" />
           )}
@@ -251,6 +267,9 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
   const [compactInstructions, setCompactInstructions] = useState("");
   const [treeOpen, setTreeOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+
+  // Model catalog, for the context-window size of the session's model.
+  const [piModels, setPiModels] = useState<PiState["models"] | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Pi owns the file once it is running in a terminal, so it must not be
@@ -304,6 +323,49 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
     };
     return () => eventSource.close();
   }, [file]);
+
+  useEffect(() => {
+    // Missing state (pi not configured) just hides the context gauge.
+    fetchJson<PiState>("/api/pi/state")
+      .then((state) => setPiModels(state.models))
+      .catch(() => {});
+  }, []);
+
+  /**
+   * Session-wide accounting from the entries themselves: dollar total across
+   * every usage-bearing item, and the context size after the latest
+   * assistant turn (what the next request will roughly resend).
+   */
+  const usageStats = useMemo(() => {
+    let cost = 0;
+    let contextTokens: number | null = null;
+    for (const item of sessionDetail?.items || []) {
+      if (item.usage?.cost?.total) cost += item.usage.cost.total;
+      if (item.role === "assistant" && item.usage) {
+        const u = item.usage;
+        const total =
+          u.totalTokens ??
+          (u.input ?? 0) + (u.output ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
+        if (total > 0) contextTokens = total;
+      }
+    }
+    return { cost, contextTokens };
+  }, [sessionDetail?.items]);
+
+  const contextWindow = useMemo(() => {
+    const model = sessionDetail?.model;
+    if (!model || !piModels) return null;
+    const known = piModels.find(
+      (candidate) =>
+        candidate.provider === model.provider && candidate.id === model.modelId,
+    );
+    return known?.contextWindow || null;
+  }, [piModels, sessionDetail?.model]);
+
+  const contextPercent =
+    usageStats.contextTokens && contextWindow
+      ? Math.min(100, Math.round((usageStats.contextTokens / contextWindow) * 100))
+      : null;
 
   const itemCount = sessionDetail?.items.length ?? 0;
   useEffect(() => {
@@ -697,6 +759,45 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
                     : "default model"}
                 </span>
               </Button>
+              {(usageStats.cost > 0 || usageStats.contextTokens !== null) && (
+                <div className="flex items-center gap-3 text-[11px] text-stone-500">
+                  {usageStats.cost > 0 && (
+                    <span title="Total cost recorded in this session">
+                      {formatCost(usageStats.cost)}
+                    </span>
+                  )}
+                  {usageStats.contextTokens !== null && (
+                    <span
+                      title={
+                        contextWindow
+                          ? `Context after the last turn: ${usageStats.contextTokens.toLocaleString()} of ${contextWindow.toLocaleString()} tokens`
+                          : `Context after the last turn: ${usageStats.contextTokens.toLocaleString()} tokens`
+                      }
+                      className="flex items-center gap-1.5"
+                    >
+                      {formatTokens(usageStats.contextTokens)} ctx
+                      {contextPercent !== null && (
+                        <>
+                          <span
+                            className="inline-block h-1 w-14 overflow-hidden rounded-full bg-white/10"
+                            aria-hidden="true"
+                          >
+                            <span
+                              className={`block h-full rounded-full ${
+                                contextPercent >= 80 ? "bg-red-400/80" : "bg-amber-400/70"
+                              }`}
+                              style={{ width: `${contextPercent}%` }}
+                            />
+                          </span>
+                          <span className={contextPercent >= 80 ? "text-red-400" : ""}>
+                            {contextPercent}%
+                          </span>
+                        </>
+                      )}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

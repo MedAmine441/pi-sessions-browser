@@ -49,6 +49,25 @@ export function localDateKey(date: Date) {
   return format(date, "yyyy-MM-dd");
 }
 
+/** Dollar cost, with enough precision to not round small turns to zero. */
+export function formatCost(cost: number) {
+  return cost >= 0.1 ? `$${cost.toFixed(2)}` : `$${cost.toFixed(4)}`;
+}
+
+/** Token counts as 1.2k / 3.4M once they stop being readable raw. */
+export function formatTokens(count: number) {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
+  return String(count);
+}
+
+/** File sizes for session cards. */
+export function formatBytes(bytes: number) {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
+
 /** Renders a canonical YYYY-MM-DD key (or any ISO timestamp) for display. */
 export function formatReadableDate(dateString: string) {
   // A bare key would otherwise parse as UTC midnight and show the wrong day.

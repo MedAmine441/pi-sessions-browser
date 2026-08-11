@@ -7,6 +7,8 @@ import { SessionInfo } from "@/types";
 import {
   announceLocationsChanged,
   fetchJson,
+  formatBytes,
+  formatCost,
   formatReadableDate,
   messageOf,
   shortenPath,
@@ -256,11 +258,22 @@ export default function SessionsGrid({ date }: { date: string }) {
                       </div>
 
                       {/* Activity visualizer */}
-                      <div className="flex items-center gap-2">
-                        <div className="text-xs font-mono font-bold text-amber-500/70">
+                      <div className="flex items-center gap-2 font-mono text-xs">
+                        {s.cost > 0 && (
+                          <span
+                            className="text-stone-500"
+                            title="Total cost recorded in this session"
+                          >
+                            {formatCost(s.cost)}
+                          </span>
+                        )}
+                        <span className="text-stone-600" title="Session file size">
+                          {formatBytes(s.size)}
+                        </span>
+                        <span className="font-bold text-amber-500/70">
                           Messages:
                           {s.messageCount}
-                        </div>
+                        </span>
                       </div>
                     </div>
                   </li>

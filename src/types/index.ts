@@ -96,6 +96,7 @@ export type PiModel = {
   id: string;
   name?: string;
   reasoning?: boolean;
+  contextWindow?: number;
 };
 export type PiState = {
   accounts: PiAccount[];
