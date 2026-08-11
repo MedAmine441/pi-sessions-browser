@@ -254,6 +254,7 @@ function summarize(file: string, stat: Stats, entries: SessionEntry[]) {
     size: stat.size,
     cost,
     hasError,
+    model: modelFromEntries(entries),
   };
 }
 

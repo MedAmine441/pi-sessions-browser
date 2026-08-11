@@ -1,8 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Folder, Trash2, ArrowLeft, RefreshCw, Terminal } from "lucide-react";
+import {
+  Folder,
+  Trash2,
+  ArrowLeft,
+  RefreshCw,
+  Terminal,
+  ListFilter,
+} from "lucide-react";
 import { SessionInfo } from "@/types";
 import {
   announceLocationsChanged,
@@ -29,6 +36,21 @@ import { toast } from "@/components/ui/toast";
 const titleOf = (session: SessionInfo) =>
   session.name || session.preview || "Untitled Session";
 
+const modelKeyOf = (session: SessionInfo) =>
+  session.model ? `${session.model.provider}/${session.model.modelId}` : "";
+
+type SortKey = "updated" | "cost" | "size" | "messages";
+
+const SORT_LABELS: Record<SortKey, string> = {
+  updated: "Last updated",
+  cost: "Cost",
+  size: "Size",
+  messages: "Messages",
+};
+
+const selectClass =
+  "h-9 rounded-xl border border-white/10 bg-stone-900/80 px-2 text-xs text-stone-300 focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 focus:outline-none";
+
 export default function SessionsGrid({ date }: { date: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -41,6 +63,33 @@ export default function SessionsGrid({ date }: { date: string }) {
   const openSessionFile = searchParams.get("session");
   const location = searchParams.get("location") || "";
   const loading = sessions === null;
+
+  const [sortBy, setSortBy] = useState<SortKey>("updated");
+  const [modelFilter, setModelFilter] = useState("");
+  const [errorsOnly, setErrorsOnly] = useState(false);
+
+  const modelOptions = useMemo(() => {
+    const keys = new Set<string>();
+    for (const s of sessions || []) {
+      const key = modelKeyOf(s);
+      if (key) keys.add(key);
+    }
+    return [...keys].sort();
+  }, [sessions]);
+
+  const visibleSessions = useMemo(() => {
+    let list = sessions || [];
+    if (modelFilter) list = list.filter((s) => modelKeyOf(s) === modelFilter);
+    if (errorsOnly) list = list.filter((s) => s.hasError);
+    if (sortBy === "updated") return list; // the server order
+    const sorted = [...list];
+    if (sortBy === "cost") sorted.sort((a, b) => b.cost - a.cost);
+    else if (sortBy === "size") sorted.sort((a, b) => b.size - a.size);
+    else sorted.sort((a, b) => b.messageCount - a.messageCount);
+    return sorted;
+  }, [sessions, modelFilter, errorsOnly, sortBy]);
+
+  const isFiltered = Boolean(modelFilter || errorsOnly);
 
   // A different date or folder is a different dataset — blank the grid.
   const dataKey = `${date} ${location}`;
@@ -157,7 +206,54 @@ export default function SessionsGrid({ date }: { date: string }) {
             {formatReadableDate(date)}
           </h1>
         </div>
-        <div className="flex items-center gap-4 w-full md:w-auto">
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+          {(sessions?.length ?? 0) > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-stone-900/60 p-2 backdrop-blur-md">
+              <ListFilter className="ml-1 h-4 w-4 text-stone-500" aria-hidden="true" />
+              <label className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-stone-500">
+                Sort
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as SortKey)}
+                  aria-label="Sort sessions"
+                  className={selectClass}
+                >
+                  {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+                    <option key={key} value={key}>
+                      {SORT_LABELS[key]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {modelOptions.length > 0 && (
+                <label className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-stone-500">
+                  Model
+                  <select
+                    value={modelFilter}
+                    onChange={(e) => setModelFilter(e.target.value)}
+                    aria-label="Filter by model"
+                    className={`${selectClass} max-w-44 truncate`}
+                  >
+                    <option value="">All models</option>
+                    {modelOptions.map((key) => (
+                      <option key={key} value={key}>
+                        {key}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label className="flex cursor-pointer items-center gap-1.5 px-1 text-[10px] font-bold uppercase tracking-widest text-stone-500 hover:text-stone-300">
+                <input
+                  type="checkbox"
+                  checked={errorsOnly}
+                  onChange={(e) => setErrorsOnly(e.target.checked)}
+                  className="h-3.5 w-3.5 cursor-pointer accent-amber-500"
+                />
+                Errors
+              </label>
+            </div>
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -192,9 +288,31 @@ export default function SessionsGrid({ date }: { date: string }) {
                 Create a new session from the timeline.
               </p>
             </div>
+          ) : visibleSessions.length === 0 ? (
+            <div className="text-center py-20">
+              <h2 className="text-xl font-bold text-stone-300 mb-2">
+                No sessions match the filters
+              </h2>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setModelFilter("");
+                  setErrorsOnly(false);
+                }}
+                className="h-auto rounded-xl bg-stone-800 px-4 py-2 text-sm text-white hover:bg-stone-700 dark:hover:bg-stone-700 hover:text-white"
+              >
+                Clear filters
+              </Button>
+            </div>
           ) : (
+            <>
+            {isFiltered && (
+              <p className="mb-4 font-mono text-xs text-stone-500" role="status">
+                {visibleSessions.length} of {sessions.length} sessions
+              </p>
+            )}
             <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {sessions.map((s) => {
+              {visibleSessions.map((s) => {
                 const title = titleOf(s);
                 return (
                   <li
@@ -288,6 +406,7 @@ export default function SessionsGrid({ date }: { date: string }) {
                 );
               })}
             </ul>
+            </>
           )}
         </div>
       </div>

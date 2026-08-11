@@ -12,6 +12,8 @@ export type SessionInfo = {
   cost: number;
   /** True when any assistant message ended in an error. */
   hasError: boolean;
+  /** The model the session is currently on (pi's restore rule). */
+  model: SessionModel | null;
 };
 
 /** One typed content block of a message, in pi's own shapes. */
