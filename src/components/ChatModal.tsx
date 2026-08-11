@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw, Cpu, GitFork, FileDown, Archive } from "lucide-react";
+import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw, Cpu, GitFork, FileDown, Archive, ListTree, Share2 } from "lucide-react";
 import { Message, SessionDetail, SessionModel } from "@/types";
 import { fetchJson, localDateKey, messageOf } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
 import { ModelDialog } from "@/components/PiControls";
+import { SessionTreeDialog, ShareSessionDialog } from "@/components/SessionDialogs";
 
 function MessageItem({ m, formatDate, onEdit }: { m: Message; formatDate: (d?: string) => string; onEdit?: (id: string, text: string) => void }) {
   const isTool = m.role === "toolResult" || (m.toolName && (m.toolName.includes("bash") || m.toolName.includes("read")));
@@ -162,6 +163,8 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
   const [isCompacting, setIsCompacting] = useState(false);
   const [compactOpen, setCompactOpen] = useState(false);
   const [compactInstructions, setCompactInstructions] = useState("");
+  const [treeOpen, setTreeOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Pi owns the file once it is running in a terminal, so it must not be
@@ -282,6 +285,15 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
 
   const router = useRouter();
 
+  /** Jump into a session file that was just created from this one. */
+  const openDerivedSession = (file: string) => {
+    const params = new URLSearchParams(window.location.search);
+    if (sessionDetail?.cwd) params.set("location", sessionDetail.cwd);
+    params.set("session", file);
+    const today = localDateKey(new Date());
+    router.push(`/${encodeURIComponent(today)}?${params.toString()}`);
+  };
+
   /** The /fork counterpart: copy the whole session and continue in the copy. */
   const handleFork = async () => {
     if (!sessionDetail) return;
@@ -292,11 +304,23 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
         body: JSON.stringify({ file: sessionDetail.file }),
       });
       toast("Forked — you are now in the copy; the original is untouched.");
-      const params = new URLSearchParams(window.location.search);
-      if (sessionDetail.cwd) params.set("location", sessionDetail.cwd);
-      params.set("session", data.file);
-      const today = localDateKey(new Date());
-      router.push(`/${encodeURIComponent(today)}?${params.toString()}`);
+      openDerivedSession(data.file);
+    } catch (err) {
+      toast(messageOf(err));
+    }
+  };
+
+  /** The /clone counterpart: only the active branch survives into the copy. */
+  const handleClone = async () => {
+    if (!sessionDetail) return;
+    try {
+      const data = await fetchJson<{ file: string }>("/api/session/clone", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file: sessionDetail.file }),
+      });
+      toast("Cloned the active branch into a new session.");
+      openDerivedSession(data.file);
     } catch (err) {
       toast(messageOf(err));
     }
@@ -369,6 +393,18 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
     }
     if (message === "/fork") {
       handleFork();
+      return;
+    }
+    if (message === "/clone") {
+      handleClone();
+      return;
+    }
+    if (message === "/tree") {
+      setTreeOpen(true);
+      return;
+    }
+    if (message === "/share") {
+      setShareOpen(true);
       return;
     }
     if (message === "/export") {
@@ -548,6 +584,17 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
               <Button
                 variant="ghost"
                 size="icon"
+                onClick={() => setTreeOpen(true)}
+                disabled={!sessionDetail || sessionGone}
+                className="rounded-full bg-white/5 hover:bg-white/20 dark:hover:bg-white/20 text-stone-300 hover:text-white"
+                title="Session tree (/tree)"
+                aria-label="Show session tree"
+              >
+                <ListTree className="w-4 h-4" aria-hidden="true" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={handleFork}
                 disabled={!sessionDetail || sessionGone}
                 className="rounded-full bg-white/5 hover:bg-white/20 dark:hover:bg-white/20 text-stone-300 hover:text-white"
@@ -566,6 +613,17 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
                 aria-label="Export session as HTML"
               >
                 <FileDown className={`w-4 h-4 ${isExporting ? "animate-pulse" : ""}`} aria-hidden="true" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShareOpen(true)}
+                disabled={!sessionDetail || sessionGone}
+                className="rounded-full bg-white/5 hover:bg-white/20 dark:hover:bg-white/20 text-stone-300 hover:text-white"
+                title="Share as secret gist (/share)"
+                aria-label="Share session"
+              >
+                <Share2 className="w-4 h-4" aria-hidden="true" />
               </Button>
               <Button
                 variant="ghost"
@@ -678,6 +736,21 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
           scope="session"
           file={sessionDetail.file}
           current={sessionDetail.model}
+        />
+      )}
+      {sessionDetail && (
+        <SessionTreeDialog
+          open={treeOpen}
+          onOpenChange={setTreeOpen}
+          file={sessionDetail.file}
+          onBranched={openDerivedSession}
+        />
+      )}
+      {sessionDetail && (
+        <ShareSessionDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          file={sessionDetail.file}
         />
       )}
 

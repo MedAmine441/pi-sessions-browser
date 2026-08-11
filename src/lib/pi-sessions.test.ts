@@ -394,6 +394,99 @@ describe("Pi session storage", () => {
     expect(original).not.toContain("parentSession");
   });
 
+  it("clones the active branch and forks from an entry like pi's createBranchedSession", async () => {
+    // root ─ answer ─ branchA (abandoned) … branchB (active, file's last entry)
+    const file = await writeSession("project/branched.jsonl", [
+      {
+        type: "session",
+        version: 3,
+        id: "branched",
+        cwd: "/work",
+        timestamp: "2026-01-01T10:00:00.000Z",
+      },
+      {
+        type: "message",
+        id: "root",
+        parentId: null,
+        timestamp: "2026-01-01T10:01:00.000Z",
+        message: { role: "user", content: "Start" },
+      },
+      {
+        type: "model_change",
+        id: "change",
+        parentId: "root",
+        timestamp: "2026-01-01T10:01:30.000Z",
+        provider: "anthropic",
+        modelId: "claude-opus-4-6",
+      },
+      {
+        type: "message",
+        id: "answer",
+        parentId: "change",
+        timestamp: "2026-01-01T10:02:00.000Z",
+        message: { role: "assistant", content: [{ type: "text", text: "Reply" }] },
+      },
+      {
+        type: "message",
+        id: "branchA",
+        parentId: "answer",
+        timestamp: "2026-01-01T10:03:00.000Z",
+        message: { role: "user", content: "Try approach A" },
+      },
+      {
+        type: "message",
+        id: "branchB",
+        parentId: "answer",
+        timestamp: "2026-01-01T10:04:00.000Z",
+        message: { role: "user", content: "Actually, approach B" },
+      },
+    ]);
+
+    // Clone: the active branch is the ancestry of the file's LAST entry, so
+    // branchA must not survive, and parentIds re-chain linearly.
+    const clone = await sessions.branchSessionAt(file);
+    const cloned = (await fs.readFile(clone, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(cloned[0]).toMatchObject({ type: "session", parentSession: file });
+    expect(cloned.slice(1).map((e: { id: string }) => e.id)).toEqual([
+      "root",
+      "change",
+      "answer",
+      "branchB",
+    ]);
+    expect(cloned.slice(1).map((e: { parentId: string | null }) => e.parentId)).toEqual([
+      null,
+      "root",
+      "change",
+      "answer",
+    ]);
+
+    // Fork from an entry (position "at"): the entry's own branch, inclusive.
+    const forked = await sessions.branchSessionAt(file, "branchA");
+    const forkedIds = (await fs.readFile(forked, "utf8"))
+      .trim()
+      .split("\n")
+      .slice(1)
+      .map((line) => JSON.parse(line).id);
+    expect(forkedIds).toEqual(["root", "change", "answer", "branchA"]);
+
+    // The tree view parents items to their nearest displayable ancestor
+    // (skipping the model_change) and marks the active path.
+    const tree = await sessions.getSessionTree(file);
+    const byId = Object.fromEntries(tree.nodes.map((n) => [n.id, n]));
+    expect(byId.answer.parentId).toBe("root");
+    expect(byId.branchA.parentId).toBe("answer");
+    expect(byId.branchB.parentId).toBe("answer");
+    expect(tree.leafId).toBe("branchB");
+    expect(tree.nodes.filter((n) => n.active).map((n) => n.id)).toEqual([
+      "root",
+      "answer",
+      "branchB",
+    ]);
+  });
+
   it("only accepts JSONL files contained in the configured session directory", async () => {
     const file = await writeSession("safe/session.jsonl", []);
     const outside = join(tmpdir(), "outside-session.jsonl");

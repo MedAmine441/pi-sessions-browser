@@ -31,6 +31,19 @@ export type SessionDetail = {
   items: Message[];
 };
 
+/** One displayable entry in the /tree view, parented to its nearest peer. */
+export type SessionTreeNode = {
+  id: string;
+  parentId: string | null;
+  role: string;
+  text: string;
+  timestamp?: string;
+  toolName?: string;
+  active: boolean;
+};
+
+export type SessionTree = { nodes: SessionTreeNode[]; leafId: string | null };
+
 /** What /api/pi/state reports about pi's own auth and model settings. */
 export type PiAccount = { provider: string; type: "oauth" | "api_key" };
 export type PiModel = {

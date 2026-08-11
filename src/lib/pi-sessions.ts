@@ -4,6 +4,7 @@ import { basename, dirname, extname, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { localDateKey } from "./utils";
+import type { SessionTreeNode } from "@/types";
 
 const sessionRoot = resolve(
   process.env.PI_SESSION_DIR || `${homedir()}/.pi/agent/sessions`,
@@ -33,6 +34,8 @@ type SessionEntry = {
   summary?: string;
   cwd?: string;
   version?: number;
+  targetId?: string;
+  label?: string;
   message?: {
     role?: string;
     content?: unknown;
@@ -788,6 +791,138 @@ export async function forkSession(file: string) {
     flag: "wx",
   });
   return target;
+}
+
+/** The id of the entry pi would treat as the current leaf: the file's last. */
+function leafIdOf(entries: SessionEntry[]) {
+  return entries.findLast((entry) => entry.type !== "session" && entry.id)?.id;
+}
+
+/** Root-to-target ancestry chain of an entry, via the parentId links. */
+function branchPath(entries: SessionEntry[], targetId: string) {
+  const byId = new Map(
+    entries.filter((entry) => entry.id).map((entry) => [entry.id!, entry]),
+  );
+  const path: SessionEntry[] = [];
+  let current = byId.get(targetId);
+  if (!current) throw new Error(`No entry ${targetId} in this session.`);
+  while (current) {
+    path.push(current);
+    current = current.parentId ? byId.get(current.parentId) : undefined;
+  }
+  return path.reverse();
+}
+
+/**
+ * The /clone and fork-from-entry counterpart, matching pi's
+ * createBranchedSession: only the ancestry path of the target entry survives
+ * (the leaf by default — the active branch), re-chained linearly with labels
+ * re-attached, in a new file whose header points back at the source.
+ */
+export async function branchSessionAt(file: string, entryId?: string) {
+  const { entries } = await load(file);
+  const header = entries.find((entry) => entry.type === "session");
+  if (!header) throw new Error("Cannot clone: the session has no header.");
+  const targetId = entryId ?? leafIdOf(entries);
+  if (!targetId) throw new Error("Nothing to clone yet.");
+
+  // Labels are re-created from the resolved map: keeping them in the path
+  // would leave entries chained through labels that may not survive.
+  const path = branchPath(entries, targetId).filter(
+    (entry) => entry.type !== "label",
+  );
+  let parentId: string | null = null;
+  const rechained = path.map((entry) => {
+    const copy = { ...entry, parentId };
+    parentId = entry.id!;
+    return copy;
+  });
+
+  const pathIds = new Set(path.map((entry) => entry.id));
+  const labels = entries.filter(
+    (entry) =>
+      entry.type === "label" && entry.targetId && pathIds.has(entry.targetId),
+  );
+  const labelEntries = labels.map((entry) => {
+    const copy = { ...entry, parentId };
+    parentId = entry.id!;
+    return copy;
+  });
+
+  const id = randomUUID();
+  const timestamp = new Date().toISOString();
+  const newHeader = {
+    type: "session",
+    version: header.version ?? 3,
+    id,
+    timestamp,
+    cwd: header.cwd,
+    parentSession: file,
+  };
+  const target = resolve(
+    dirname(file),
+    `${timestamp.replace(/[:.]/g, "-")}_${id}.jsonl`,
+  );
+  const lines = [newHeader, ...rechained, ...labelEntries].map((entry) =>
+    JSON.stringify(entry),
+  );
+  await fs.writeFile(target, lines.join("\n") + "\n", {
+    encoding: "utf-8",
+    flag: "wx",
+  });
+  return target;
+}
+
+/**
+ * The conversation as a tree for the /tree view: every displayable item,
+ * parented to its nearest displayable ancestor (change entries and names sit
+ * between them in the chain), with pi's active path — the ancestry of the
+ * file's last entry — marked.
+ */
+export async function getSessionTree(file: string) {
+  const { entries } = await load(file);
+  const byId = new Map(
+    entries.filter((entry) => entry.id).map((entry) => [entry.id!, entry]),
+  );
+
+  const itemIds = new Set<string>();
+  const paired: { entry: SessionEntry; item: NonNullable<ReturnType<typeof conversationItemFromEntry>> }[] = [];
+  for (const entry of entries) {
+    const item = conversationItemFromEntry(entry);
+    if (item && entry.id) {
+      itemIds.add(entry.id);
+      paired.push({ entry, item });
+    }
+  }
+
+  const nearestItemAncestor = (entry: SessionEntry) => {
+    let walk = entry.parentId ?? null;
+    while (walk && !itemIds.has(walk)) {
+      walk = byId.get(walk)?.parentId ?? null;
+    }
+    return walk;
+  };
+
+  const active = new Set<string>();
+  const leafId = leafIdOf(entries);
+  if (leafId) {
+    for (const entry of branchPath(entries, leafId)) {
+      if (entry.id && itemIds.has(entry.id)) active.add(entry.id);
+    }
+  }
+
+  const nodes: SessionTreeNode[] = paired.map(({ entry, item }) => ({
+    id: entry.id!,
+    parentId: nearestItemAncestor(entry),
+    role: item.role,
+    text: short(item.text || "", 120),
+    timestamp: item.timestamp,
+    toolName: item.toolName,
+    active: active.has(entry.id!),
+  }));
+
+  const leafItem = [...active].at(-1) ?? null;
+  return { nodes, leafId: leafItem };
 }
 
 export async function renameSession(file: string, newName: string) {
