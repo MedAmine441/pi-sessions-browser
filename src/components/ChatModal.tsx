@@ -118,7 +118,11 @@ function MessageItem({
         m.role === "user"
           ? "bg-amber-950/40 border-amber-500/30 ml-0 md:ml-12 shadow-[0_4_20px_rgba(59,130,246,0.1)]"
           : m.role === "assistant"
-          ? "bg-orange-950/20 border-orange-500/30 mr-0 md:mr-12 shadow-[0_4_20px_rgba(16,185,129,0.05)]"
+          ? `${
+              m.stopReason === "error"
+                ? "bg-red-950/20 border-red-500/40"
+                : "bg-orange-950/20 border-orange-500/30"
+            } mr-0 md:mr-12 shadow-[0_4_20px_rgba(16,185,129,0.05)]`
           : m.role === "summary"
           ? "bg-transparent border-white/5 text-stone-400 italic text-center mx-auto max-w-lg"
           : "bg-stone-900/60 border-white/10 opacity-80"
@@ -146,6 +150,27 @@ function MessageItem({
             )}
           </div>
           <div className="flex items-center gap-3">
+            {m.role === "assistant" &&
+              (m.stopReason === "error" ||
+                m.stopReason === "aborted" ||
+                m.stopReason === "length") && (
+                <span
+                  className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
+                    m.stopReason === "error"
+                      ? "bg-red-500/20 text-red-300"
+                      : "bg-white/10 text-stone-400"
+                  }`}
+                  title={
+                    m.stopReason === "error"
+                      ? "This turn ended in an error"
+                      : m.stopReason === "aborted"
+                        ? "This turn was aborted"
+                        : "This turn hit the output length limit"
+                  }
+                >
+                  {m.stopReason === "length" ? "max length" : m.stopReason}
+                </span>
+              )}
             {m.role === "assistant" && m.usage && (
               <div
                 className="text-[10px] text-stone-500 font-mono"
@@ -226,6 +251,11 @@ function MessageItem({
           {m.role === "summary" && m.tokensBefore !== undefined && (
             <div className="mt-1 font-mono text-[10px] not-italic text-stone-500">
               compacted from {formatTokens(m.tokensBefore)} tokens
+            </div>
+          )}
+          {m.role === "assistant" && m.errorMessage && (
+            <div className="mt-2 rounded-lg border border-red-500/30 bg-red-950/30 px-3 py-2 font-mono text-xs whitespace-pre-wrap text-red-300">
+              {m.errorMessage}
             </div>
           )}
           {isTool && !isOpen && (

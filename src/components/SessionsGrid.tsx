@@ -259,6 +259,14 @@ export default function SessionsGrid({ date }: { date: string }) {
 
                       {/* Activity visualizer */}
                       <div className="flex items-center gap-2 font-mono text-xs">
+                        {s.hasError && (
+                          <span
+                            className="rounded-md bg-red-500/15 px-1.5 py-0.5 text-[10px] font-bold text-red-400"
+                            title="An assistant turn in this session ended in an error"
+                          >
+                            error
+                          </span>
+                        )}
                         {s.cost > 0 && (
                           <span
                             className="text-stone-500"
