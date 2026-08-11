@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw, Cpu, GitFork, FileDown, Archive, ListTree, Share2 } from "lucide-react";
+import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw, Cpu, GitFork, FileDown, Archive, ListTree, Search, Share2 } from "lucide-react";
 import { Message, PiState, SessionDetail, SessionModel } from "@/types";
 import { fetchJson, formatCost, formatTokens, localDateKey, messageOf } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -88,18 +88,34 @@ const hasReadableContent = (m: Message) =>
       )
     : Boolean(m.text.trim());
 
+/** Everything the in-chat find can match against for one message. */
+const findableTextOf = (m: Message) =>
+  [
+    m.text,
+    m.command,
+    m.output,
+    ...(m.parts || []).map((part) =>
+      part.type === "text" ? part.text : part.type === "thinking" ? part.thinking : "",
+    ),
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+
 function MessageItem({
   m,
   formatDate,
   onEdit,
   hideToolCalls,
   resultFor,
+  highlighted,
 }: {
   m: Message;
   formatDate: (d?: string) => string;
   onEdit?: (id: string, text: string) => void;
   hideToolCalls: boolean;
   resultFor: (callId?: string) => Message | undefined;
+  highlighted?: boolean;
 }) {
   const isTool = m.role === "toolResult";
   const [isOpen, setIsOpen] = useState(!isTool);
@@ -122,7 +138,10 @@ function MessageItem({
 
   return (
     <article
+      id={`msg-${m.id}`}
       className={`group/msg p-5 rounded-2xl border backdrop-blur-md transition-all ${
+        highlighted ? "ring-2 ring-amber-400/70 " : ""
+      }${
         m.role === "user"
           ? "bg-amber-950/40 border-amber-500/30 ml-0 md:ml-12 shadow-[0_4_20px_rgba(59,130,246,0.1)]"
           : m.role === "assistant"
@@ -305,6 +324,9 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
   const [compactInstructions, setCompactInstructions] = useState("");
   const [treeOpen, setTreeOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findAt, setFindAt] = useState(0);
 
   // Model catalog, for the context-window size of the session's model.
   const [piModels, setPiModels] = useState<PiState["models"] | null>(null);
@@ -412,14 +434,23 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
     }
   }, [itemCount]);
 
-  // Escape closes the dialog, matching the backdrop click.
+  // Escape closes the find bar first, then the dialog (matching the
+  // backdrop click); Ctrl/Cmd+F opens in-conversation find.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setFindOpen(true);
+        return;
+      }
+      if (e.key === "Escape") {
+        if (findOpen) setFindOpen(false);
+        else close();
+      }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [close]);
+  }, [close, findOpen]);
 
   const handleEditMessage = async (messageId: string, newText: string) => {
     if (!sessionDetail) return;
@@ -719,6 +750,30 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
     [sessionDetail?.items, pairedResultIds, hideToolCalls],
   );
 
+  const matchIds = useMemo(() => {
+    const needle = findQuery.trim().toLowerCase();
+    if (!findOpen || !needle) return [];
+    return visibleItems
+      .filter((m) => findableTextOf(m).includes(needle))
+      .map((m) => m.id);
+  }, [findOpen, findQuery, visibleItems]);
+
+  // The stored position may outlive a shrinking match list; clamp at render.
+  const matchAt = matchIds.length ? Math.min(findAt, matchIds.length - 1) : 0;
+  const currentMatchId = matchIds[matchAt];
+
+  useEffect(() => {
+    if (currentMatchId)
+      document
+        .getElementById(`msg-${currentMatchId}`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [currentMatchId]);
+
+  const stepFind = (delta: number) => {
+    if (!matchIds.length) return;
+    setFindAt((matchAt + delta + matchIds.length) % matchIds.length);
+  };
+
   const sessionTitle = sessionDetail
     ? (sessionDetail.name || sessionDetail.preview || "Untitled Session")
     : "Initializing Session...";
@@ -938,6 +993,60 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
 
         {/* Messages */}
         <section aria-label="Conversation" className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar">
+          {findOpen && (
+            <div className="sticky -top-4 md:-top-6 z-20 mx-auto mb-4 flex max-w-md items-center gap-2 rounded-2xl border border-white/10 bg-stone-950/95 px-3 py-2 shadow-xl backdrop-blur-xl">
+              <Search className="h-3.5 w-3.5 shrink-0 text-stone-500" aria-hidden="true" />
+              <input
+                autoFocus
+                value={findQuery}
+                onChange={(e) => {
+                  setFindQuery(e.target.value);
+                  setFindAt(0);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    stepFind(e.shiftKey ? -1 : 1);
+                  }
+                }}
+                placeholder="Find in conversation…"
+                aria-label="Find in conversation"
+                className="w-full bg-transparent text-sm text-stone-200 placeholder-stone-500 focus:outline-none"
+              />
+              <span className="shrink-0 font-mono text-[10px] text-stone-500" aria-live="polite">
+                {findQuery.trim() ? (matchIds.length ? `${matchAt + 1}/${matchIds.length}` : "0/0") : ""}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => stepFind(-1)}
+                disabled={!matchIds.length}
+                className="rounded-md bg-white/5 text-stone-400 hover:bg-white/10 dark:hover:bg-white/10 hover:text-white"
+                aria-label="Previous match"
+              >
+                <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => stepFind(1)}
+                disabled={!matchIds.length}
+                className="rounded-md bg-white/5 text-stone-400 hover:bg-white/10 dark:hover:bg-white/10 hover:text-white"
+                aria-label="Next match"
+              >
+                <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => setFindOpen(false)}
+                className="rounded-md bg-white/5 text-stone-400 hover:bg-white/10 dark:hover:bg-white/10 hover:text-white"
+                aria-label="Close find"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+              </Button>
+            </div>
+          )}
           <div className="flex flex-col gap-6 max-w-4xl mx-auto">
             {sessionDetail && (
               visibleItems.length === 0 ? (
@@ -956,6 +1065,7 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
                     onEdit={handleEditMessage}
                     hideToolCalls={hideToolCalls}
                     resultFor={resultFor}
+                    highlighted={m.id === currentMatchId}
                   />
                 ))
               )

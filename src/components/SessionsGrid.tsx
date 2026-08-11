@@ -162,6 +162,35 @@ export default function SessionsGrid({ date }: { date: string }) {
     }
   };
 
+  // Arrow keys and j/k rove focus across the card buttons; Enter then opens
+  // the focused card natively. Typing surfaces (inputs, dialogs) are exempt.
+  useEffect(() => {
+    if (openSessionFile || pendingDelete) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const forward = ["ArrowRight", "ArrowDown", "j"].includes(e.key);
+      if (!forward && !["ArrowLeft", "ArrowUp", "k"].includes(e.key)) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable=true], [role=dialog]"))
+        return;
+      const cards = [
+        ...document.querySelectorAll<HTMLButtonElement>("[data-session-card]"),
+      ];
+      if (!cards.length) return;
+      const at = cards.indexOf(document.activeElement as HTMLButtonElement);
+      const next =
+        at === -1
+          ? forward
+            ? 0
+            : cards.length - 1
+          : Math.min(Math.max(at + (forward ? 1 : -1), 0), cards.length - 1);
+      e.preventDefault();
+      cards[next]?.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [openSessionFile, pendingDelete]);
+
   const handleSessionClick = (file: string) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set("session", file);
@@ -331,6 +360,7 @@ export default function SessionsGrid({ date }: { date: string }) {
                       <h2 className="min-w-0 flex-1 text-lg font-bold">
                         <Button
                           variant="ghost"
+                          data-session-card
                           onClick={() => handleSessionClick(s.file)}
                           className="h-auto w-full justify-start rounded-none bg-transparent p-0 text-left text-lg font-bold text-stone-200 hover:bg-transparent dark:hover:bg-transparent hover:text-amber-300 group-hover:text-amber-300 focus-visible:border-transparent focus-visible:ring-0 active:translate-none! after:absolute after:inset-0 after:rounded-3xl after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-amber-400/70"
                         >
