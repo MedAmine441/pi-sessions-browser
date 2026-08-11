@@ -2,13 +2,21 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
+import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw, Cpu, GitFork, FileDown, Archive } from "lucide-react";
 import { Message, SessionDetail, SessionModel } from "@/types";
-import { localDateKey, messageOf } from "@/lib/utils";
+import { fetchJson, localDateKey, messageOf } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
 import { ModelDialog } from "@/components/PiControls";
-import { Cpu } from "lucide-react";
 
 function MessageItem({ m, formatDate, onEdit }: { m: Message; formatDate: (d?: string) => string; onEdit?: (id: string, text: string) => void }) {
   const isTool = m.role === "toolResult" || (m.toolName && (m.toolName.includes("bash") || m.toolName.includes("read")));
@@ -150,6 +158,10 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
   const [chatInput, setChatInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [pickingModel, setPickingModel] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isCompacting, setIsCompacting] = useState(false);
+  const [compactOpen, setCompactOpen] = useState(false);
+  const [compactInstructions, setCompactInstructions] = useState("");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Pi owns the file once it is running in a terminal, so it must not be
@@ -270,6 +282,77 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
 
   const router = useRouter();
 
+  /** The /fork counterpart: copy the whole session and continue in the copy. */
+  const handleFork = async () => {
+    if (!sessionDetail) return;
+    try {
+      const data = await fetchJson<{ file: string }>("/api/session/fork", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file: sessionDetail.file }),
+      });
+      toast("Forked — you are now in the copy; the original is untouched.");
+      const params = new URLSearchParams(window.location.search);
+      if (sessionDetail.cwd) params.set("location", sessionDetail.cwd);
+      params.set("session", data.file);
+      const today = localDateKey(new Date());
+      router.push(`/${encodeURIComponent(today)}?${params.toString()}`);
+    } catch (err) {
+      toast(messageOf(err));
+    }
+  };
+
+  /** The /export counterpart: pi renders its own HTML; download it. */
+  const handleExport = async () => {
+    if (!sessionDetail || isExporting) return;
+    setIsExporting(true);
+    try {
+      const res = await fetch(
+        `/api/session/export?file=${encodeURIComponent(sessionDetail.file)}`,
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "Failed to export session");
+      }
+      const blob = await res.blob();
+      const match = (res.headers.get("Content-Disposition") || "").match(
+        /filename="([^"]+)"/,
+      );
+      const anchor = document.createElement("a");
+      anchor.href = URL.createObjectURL(blob);
+      anchor.download = match?.[1] || "session.html";
+      anchor.click();
+      URL.revokeObjectURL(anchor.href);
+    } catch (err) {
+      toast(messageOf(err));
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  /** The /compact counterpart: pi summarizes older context via RPC. */
+  const handleCompact = async () => {
+    if (!sessionDetail || isCompacting) return;
+    setCompactOpen(false);
+    setIsCompacting(true);
+    try {
+      await fetchJson("/api/session/compact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          file: sessionDetail.file,
+          customInstructions: compactInstructions,
+        }),
+      });
+      setCompactInstructions("");
+      toast("Session compacted.");
+    } catch (err) {
+      toast(messageOf(err));
+    } finally {
+      setIsCompacting(false);
+    }
+  };
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     // One pi process per session at a time: a second send against the same
@@ -279,8 +362,43 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
     const message = chatInput.trim();
     setChatInput("");
 
+    // Slash commands typed into the chat behave like pi's own.
     if (message === "/quit") {
       close();
+      return;
+    }
+    if (message === "/fork") {
+      handleFork();
+      return;
+    }
+    if (message === "/export") {
+      handleExport();
+      return;
+    }
+    if (message === "/compact" || message.startsWith("/compact ")) {
+      setCompactInstructions(message.slice("/compact".length).trim());
+      setCompactOpen(true);
+      return;
+    }
+    if (message === "/model") {
+      setPickingModel(true);
+      return;
+    }
+    if (message === "/name" || message.startsWith("/name ")) {
+      const newName = message.slice("/name".length).trim();
+      if (!newName) {
+        startRename();
+        return;
+      }
+      try {
+        await fetchJson("/api/session/rename", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file: sessionDetail.file, name: newName }),
+        });
+      } catch (err) {
+        toast(messageOf(err));
+      }
       return;
     }
 
@@ -426,7 +544,40 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
           </div>
 
           <div className="flex flex-col items-end gap-4 shrink-0">
-            <div className="flex items-center gap-3 self-end">
+            <div className="flex items-center gap-2 self-end">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleFork}
+                disabled={!sessionDetail || sessionGone}
+                className="rounded-full bg-white/5 hover:bg-white/20 dark:hover:bg-white/20 text-stone-300 hover:text-white"
+                title="Fork session (/fork)"
+                aria-label="Fork session"
+              >
+                <GitFork className="w-4 h-4" aria-hidden="true" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleExport}
+                disabled={!sessionDetail || sessionGone || isExporting}
+                className="rounded-full bg-white/5 hover:bg-white/20 dark:hover:bg-white/20 text-stone-300 hover:text-white"
+                title="Export as HTML (/export)"
+                aria-label="Export session as HTML"
+              >
+                <FileDown className={`w-4 h-4 ${isExporting ? "animate-pulse" : ""}`} aria-hidden="true" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setCompactOpen(true)}
+                disabled={!sessionDetail || sessionGone || isThinking || isCompacting}
+                className="rounded-full bg-white/5 hover:bg-white/20 dark:hover:bg-white/20 text-stone-300 hover:text-white"
+                title="Compact session (/compact)"
+                aria-label="Compact session"
+              >
+                <Archive className={`w-4 h-4 ${isCompacting ? "animate-pulse" : ""}`} aria-hidden="true" />
+              </Button>
               <Button
                 variant="ghost"
                 onClick={handleResumeClick}
@@ -489,6 +640,11 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
               <span className="flex items-center gap-2"><RefreshCw className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> Pi is thinking...</span>
             </div>
           )}
+          {isCompacting && (
+            <div className="mb-3 flex items-center gap-2 text-xs text-amber-400 font-mono" role="status">
+              <Archive className="w-3.5 h-3.5 animate-pulse" aria-hidden="true" /> Compacting session…
+            </div>
+          )}
           {sessionGone && (
             <div className="mb-3 text-xs text-red-400 font-mono" role="status">
               This session&apos;s file is gone or can no longer be streamed.
@@ -524,6 +680,43 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
           current={sessionDetail.model}
         />
       )}
+
+      <Dialog open={compactOpen} onOpenChange={setCompactOpen}>
+        <DialogContent className="border border-white/10 bg-stone-950/95 text-stone-200 backdrop-blur-2xl sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Archive className="h-4 w-4 text-amber-400" aria-hidden="true" />
+              Compact this session?
+            </DialogTitle>
+            <DialogDescription>
+              pi summarizes the older context into a compaction entry — exactly
+              what /compact does in the terminal. This can take a minute and
+              uses the session&apos;s model.
+            </DialogDescription>
+          </DialogHeader>
+          <label className="block">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-stone-500">
+              Instructions (optional)
+            </span>
+            <textarea
+              value={compactInstructions}
+              onChange={(e) => setCompactInstructions(e.target.value)}
+              placeholder="e.g. keep every file path we touched"
+              className="custom-scrollbar min-h-20 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-stone-200 placeholder-stone-500 focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 focus:outline-none"
+            />
+          </label>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            <Button
+              onClick={handleCompact}
+              disabled={isCompacting}
+              className="bg-amber-600 text-white hover:bg-amber-500"
+            >
+              <Archive className="w-4 h-4" aria-hidden="true" /> Compact
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -351,6 +351,49 @@ describe("Pi session storage", () => {
     });
   });
 
+  it("forks a session the way pi's forkFrom does", async () => {
+    const source = await writeSession("project/source.jsonl", [
+      {
+        type: "session",
+        version: 3,
+        id: "source",
+        cwd: "/work",
+        timestamp: "2026-01-01T10:00:00.000Z",
+      },
+      {
+        type: "message",
+        id: "msg-1",
+        parentId: null,
+        timestamp: "2026-01-01T10:01:00.000Z",
+        message: { role: "user", content: "Original" },
+      },
+    ]);
+
+    const forked = await sessions.forkSession(source);
+
+    expect(forked).not.toBe(source);
+    expect(forked.startsWith(join(sessionDir, "project"))).toBe(true);
+    const lines = (await fs.readFile(forked, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(lines[0]).toMatchObject({
+      type: "session",
+      version: 3,
+      cwd: "/work",
+      parentSession: source,
+    });
+    expect(lines[0].id).not.toBe("source");
+    // Every non-header entry rides along, ids intact.
+    expect(lines.slice(1)).toEqual([
+      expect.objectContaining({ type: "message", id: "msg-1" }),
+    ]);
+    // The original is untouched.
+    const original = await fs.readFile(source, "utf8");
+    expect(original).toContain('"id":"source"');
+    expect(original).not.toContain("parentSession");
+  });
+
   it("only accepts JSONL files contained in the configured session directory", async () => {
     const file = await writeSession("safe/session.jsonl", []);
     const outside = join(tmpdir(), "outside-session.jsonl");

@@ -32,6 +32,7 @@ type SessionEntry = {
   name?: string;
   summary?: string;
   cwd?: string;
+  version?: number;
   message?: {
     role?: string;
     content?: unknown;
@@ -748,6 +749,45 @@ async function appendChainedEntry(
     timestamp: new Date().toISOString(),
   };
   await fs.appendFile(file, JSON.stringify(entry) + "\n", "utf-8");
+}
+
+/**
+ * The /fork counterpart, matching pi's SessionManager.forkFrom: a new file in
+ * the same session directory with a fresh id and timestamp, a header whose
+ * parentSession points at the source, and every non-header entry copied —
+ * the whole tree, unlike /clone which takes only the active branch.
+ */
+export async function forkSession(file: string) {
+  const { entries } = await load(file);
+  const header = entries.find((entry) => entry.type === "session");
+  if (!header) throw new Error("Cannot fork: the session has no header.");
+
+  const id = randomUUID();
+  const timestamp = new Date().toISOString();
+  const newHeader = {
+    type: "session",
+    version: header.version ?? 3,
+    id,
+    timestamp,
+    cwd: header.cwd,
+    parentSession: file,
+  };
+  const target = resolve(
+    dirname(file),
+    `${timestamp.replace(/[:.]/g, "-")}_${id}.jsonl`,
+  );
+  const lines = [
+    JSON.stringify(newHeader),
+    ...entries
+      .filter((entry) => entry.type !== "session")
+      .map((entry) => JSON.stringify(entry)),
+  ];
+  // wx: a fork must never overwrite anything.
+  await fs.writeFile(target, lines.join("\n") + "\n", {
+    encoding: "utf-8",
+    flag: "wx",
+  });
+  return target;
 }
 
 export async function renameSession(file: string, newName: string) {
