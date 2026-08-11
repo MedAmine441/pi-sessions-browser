@@ -78,6 +78,13 @@ export type SessionDetail = {
   items: Message[];
 };
 
+/** One /api/search hit: a session summary plus where and what matched. */
+export type SearchHit = SessionInfo & {
+  snippet: string;
+  matchedIn: "name" | "message";
+  date: string | null;
+};
+
 /** One displayable entry in the /tree view, parented to its nearest peer. */
 export type SessionTreeNode = {
   id: string;

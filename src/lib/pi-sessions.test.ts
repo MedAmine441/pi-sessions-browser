@@ -691,6 +691,49 @@ describe("Pi session storage", () => {
     }
   });
 
+  it("searches names, message text, thinking, and bash runs across sessions", async () => {
+    await writeSession("--work-a--/2026-03-05T12-00-00-000Z_x.jsonl", [
+      { type: "session", id: "by-text", cwd: "/work/a", timestamp: "2026-03-05T12:00:00.000Z" },
+      {
+        type: "message",
+        id: "m1",
+        timestamp: "2026-03-05T12:01:00.000Z",
+        message: { role: "user", content: "the flux capacitor overheats" },
+      },
+    ]);
+    await writeSession("--work-b--/2026-03-06T12-00-00-000Z_y.jsonl", [
+      { type: "session", id: "by-name", cwd: "/work/b", timestamp: "2026-03-06T12:00:00.000Z" },
+      { type: "session_info", id: "n1", name: "Flux capacitor notes" },
+      {
+        type: "message",
+        id: "m2",
+        timestamp: "2026-03-06T12:01:00.000Z",
+        message: { role: "user", content: "unrelated" },
+      },
+    ]);
+    await writeSession("--work-b--/2026-03-07T12-00-00-000Z_z.jsonl", [
+      { type: "session", id: "by-bash", cwd: "/work/b", timestamp: "2026-03-07T12:00:00.000Z" },
+      {
+        type: "message",
+        id: "m3",
+        timestamp: "2026-03-07T12:01:00.000Z",
+        message: { role: "bashExecution", command: "grep flux src/", output: "", exitCode: 0 },
+      },
+    ]);
+
+    const results = await sessions.searchSessions("flux");
+    expect(results.map((r) => r.id).sort()).toEqual(["by-bash", "by-name", "by-text"]);
+    const byName = results.find((r) => r.id === "by-name");
+    expect(byName).toMatchObject({ matchedIn: "name", date: "2026-03-06" });
+    const byText = results.find((r) => r.id === "by-text");
+    expect(byText?.snippet).toContain("flux capacitor");
+
+    // Location scoping and the minimum query length both hold.
+    const scoped = await sessions.searchSessions("flux", "/work/b");
+    expect(scoped.map((r) => r.id).sort()).toEqual(["by-bash", "by-name"]);
+    await expect(sessions.searchSessions("f")).resolves.toEqual([]);
+  });
+
   it("only accepts JSONL files contained in the configured session directory", async () => {
     const file = await writeSession("safe/session.jsonl", []);
     const outside = join(tmpdir(), "outside-session.jsonl");

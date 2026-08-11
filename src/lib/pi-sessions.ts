@@ -627,6 +627,95 @@ export async function listSessions(targetDate?: string, location?: string) {
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 }
 
+/** A case-insensitive needle with ~80 chars of context around the hit. */
+function snippetAround(haystack: string, needle: string) {
+  const at = haystack.toLowerCase().indexOf(needle.toLowerCase());
+  if (at === -1) return null;
+  const start = Math.max(0, at - 40);
+  const end = Math.min(haystack.length, at + needle.length + 60);
+  return `${start > 0 ? "…" : ""}${haystack
+    .slice(start, end)
+    .replace(/\s+/g, " ")
+    .trim()}${end < haystack.length ? "…" : ""}`;
+}
+
+/** Everything in a message worth matching a search against. */
+function searchableTextOf(entry: SessionEntry) {
+  const message = entry.message;
+  if (!message) return "";
+  if (message.role === "bashExecution")
+    return [message.command, message.output].filter(Boolean).join("\n");
+  const content = message.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return (content as ContentPart[])
+    .map((part) => part?.text || part?.thinking || "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+export type SearchResult = ReturnType<typeof summarize> & {
+  snippet: string;
+  matchedIn: "name" | "message";
+  date: string | null;
+};
+
+/**
+ * Full-text search across session files: a bounded line-scan, no index.
+ * Matches session names and message text (including thinking and bash runs);
+ * each file contributes its first hit.
+ */
+export async function searchSessions(
+  query: string,
+  location?: string,
+  limit = 30,
+) {
+  const needle = query.trim();
+  if (needle.length < 2) return [];
+  const files = await collectFiles(location);
+
+  let found = 0;
+  const matches = await mapLimit(files, 16, async (file) => {
+    if (found >= limit * 2) return null; // enough candidates to rank
+    let loaded;
+    try {
+      loaded = await load(file);
+    } catch {
+      return null; // oversized or unreadable — skip, same as listings do
+    }
+    const { stat, entries } = loaded;
+    const summary = summarize(file, stat, entries);
+    if (summary.messageCount === 0) return null;
+
+    let snippet: string | null = null;
+    let matchedIn: SearchResult["matchedIn"] = "message";
+    if (summary.name && snippetAround(summary.name, needle)) {
+      snippet = summary.name;
+      matchedIn = "name";
+    } else {
+      for (const entry of entries) {
+        if (entry.type !== "message") continue;
+        snippet = snippetAround(searchableTextOf(entry), needle);
+        if (snippet) break;
+      }
+    }
+    if (!snippet) return null;
+    found++;
+    const timestamp = timestampFromFilename(file);
+    return {
+      ...summary,
+      snippet,
+      matchedIn,
+      date: timestamp ? localDateKey(timestamp) : null,
+    } satisfies SearchResult;
+  });
+
+  return matches
+    .filter((match): match is SearchResult => match !== null)
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+    .slice(0, limit);
+}
+
 /** Shapes one raw session entry into a renderable conversation item. */
 export function conversationItemFromEntry(entry: SessionEntry) {
   if (entry.type === "message") {
