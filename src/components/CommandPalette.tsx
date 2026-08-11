@@ -12,7 +12,13 @@ import {
   Search,
 } from "lucide-react";
 import type { SearchHit } from "@/types";
-import { fetchJson, localDateKey, messageOf, shortenPath } from "@/lib/utils";
+import {
+  fetchJson,
+  localDateKey,
+  messageOf,
+  OPEN_PALETTE,
+  shortenPath,
+} from "@/lib/utils";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import FolderPicker from "@/components/FolderPicker";
 import { toast } from "@/components/ui/toast";
@@ -71,6 +77,13 @@ export default function CommandPalette() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleOpenChange]);
+
+  // The sidebar's search button opens the same palette without the hotkey.
+  useEffect(() => {
+    const onOpen = () => handleOpenChange(true);
+    window.addEventListener(OPEN_PALETTE, onOpen);
+    return () => window.removeEventListener(OPEN_PALETTE, onOpen);
   }, [handleOpenChange]);
 
   // Debounced full-text search once the query is worth scanning for. All

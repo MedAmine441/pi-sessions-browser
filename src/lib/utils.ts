@@ -23,6 +23,13 @@ export function announcePinsChanged() {
   window.dispatchEvent(new Event(PINS_CHANGED));
 }
 
+/** Asks the command palette to open — the clickable twin of Ctrl+K. */
+export const OPEN_PALETTE = "pi-sessions:open-palette";
+
+export function announceOpenPalette() {
+  window.dispatchEvent(new Event(OPEN_PALETTE));
+}
+
 /**
  * Fetch + parse + error extraction in one place, so response shapes are typed
  * at the boundary and API error payloads become thrown messages.

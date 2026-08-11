@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { FolderGit2, Menu, Pin, X } from "lucide-react";
+import { FolderGit2, Menu, Pin, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { SessionInfo } from "@/types";
 import {
+  announceOpenPalette,
   dateKeyOfSessionFile,
   fetchJson,
   localDateKey,
@@ -180,6 +181,22 @@ export default function Sidebar() {
             <X className="w-5 h-5" />
           </Button>
         </div>
+
+        <Button
+          variant="ghost"
+          onClick={() => {
+            announceOpenPalette();
+            setIsOpen(false);
+          }}
+          title="Search every session and run commands (Ctrl+K)"
+          className="mb-4 h-auto w-full justify-start gap-3 rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-left text-sm text-stone-400 hover:bg-stone-900 dark:hover:bg-stone-900 hover:text-stone-200"
+        >
+          <Search className="w-4 h-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">Search sessions…</span>
+          <kbd className="shrink-0 rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-stone-500">
+            Ctrl K
+          </kbd>
+        </Button>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
           {pinnedSessions.length > 0 && (
