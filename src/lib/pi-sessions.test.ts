@@ -313,4 +313,17 @@ describe("Pi session storage", () => {
 
     await fs.rm(outside, { force: true });
   });
+
+  it("rejects a symlink inside the session dir that points outside it", async () => {
+    const outside = join(tmpdir(), "pi-sessions-symlink-target.jsonl");
+    await fs.writeFile(outside, "");
+    const link = join(sessionDir, "sneaky.jsonl");
+    await fs.symlink(outside, link);
+
+    await expect(sessions.safeSessionPath(link)).rejects.toThrow(
+      "outside Pi's session directory",
+    );
+
+    await fs.rm(outside, { force: true });
+  });
 });
