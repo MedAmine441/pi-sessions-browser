@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { memo, useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw, Cpu, GitFork, FileDown, Archive, ListTree, Search, Share2 } from "lucide-react";
 import { Message, MessagePart, PiState, SessionDetail, SessionModel } from "@/types";
@@ -112,6 +112,15 @@ type RpcStreamPayload =
 const editableTextOf = (m: Message) =>
   m.parts?.find((part) => part.type === "text")?.text ?? m.text;
 
+// Compaction and branch entries can arrive without a timestamp; showing
+// nothing beats showing "Invalid Date". Module-scoped so the memoized
+// MessageItem sees a stable reference.
+const formatDate = (d?: string) => {
+  if (!d) return "";
+  const date = new Date(d);
+  return isNaN(date.getTime()) ? "" : date.toLocaleString();
+};
+
 /** Non-assistant content: plain text parts and images, no markdown. */
 function PlainParts({ m }: { m: Message }) {
   if (!m.parts?.length)
@@ -184,7 +193,12 @@ const findableTextOf = (m: Message) =>
     .join("\n")
     .toLowerCase();
 
-function MessageItem({
+/**
+ * Memoized: streaming deltas re-render ChatModal many times a second, and
+ * without this every message in a long chat re-renders with each token.
+ * All props must stay referentially stable across delta updates.
+ */
+const MessageItem = memo(function MessageItem({
   m,
   formatDate,
   onEdit,
@@ -376,7 +390,7 @@ function MessageItem({
       )}
     </article>
   );
-}
+});
 
 /** What /api/stream sends: one snapshot, then only what changed. */
 type StreamPayload =
@@ -655,22 +669,24 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [close, findOpen]);
 
-  const handleEditMessage = async (messageId: string, newText: string) => {
-    if (!sessionDetail) return;
-    try {
-      const res = await fetch("/api/message/edit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ file: sessionDetail.file, messageId, newText })
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.error || "Failed to edit message");
+  const handleEditMessage = useCallback(
+    async (messageId: string, newText: string) => {
+      try {
+        const res = await fetch("/api/message/edit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file, messageId, newText })
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          throw new Error(data?.error || "Failed to edit message");
+        }
+      } catch (e) {
+        toast(messageOf(e));
       }
-    } catch (e) {
-      toast(messageOf(e));
-    }
-  };
+    },
+    [file],
+  );
 
   const handleRenameSubmit = async () => {
     if (!sessionDetail) return;
@@ -917,14 +933,6 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
     } finally {
       setIsThinking(false);
     }
-  };
-
-  // Compaction and branch entries can arrive without a timestamp; showing
-  // nothing beats showing "Invalid Date".
-  const formatDate = (d?: string) => {
-    if (!d) return "";
-    const date = new Date(d);
-    return isNaN(date.getTime()) ? "" : date.toLocaleString();
   };
 
   /**
