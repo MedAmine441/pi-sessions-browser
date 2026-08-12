@@ -31,6 +31,22 @@ export function announceOpenPalette() {
 }
 
 /**
+ * The background-effects toggle: the WebGL liquid and ember canvases are
+ * pure decoration, and turning them off should stick across launches.
+ */
+export const EFFECTS_KEY = "piSessionBrowser_backgroundEffects";
+export const EFFECTS_CHANGED = "pi-sessions:effects-changed";
+
+export function backgroundEffectsEnabled() {
+  return localStorage.getItem(EFFECTS_KEY) !== "false";
+}
+
+export function setBackgroundEffectsEnabled(enabled: boolean) {
+  localStorage.setItem(EFFECTS_KEY, String(enabled));
+  window.dispatchEvent(new Event(EFFECTS_CHANGED));
+}
+
+/**
  * Fetch + parse + error extraction in one place, so response shapes are typed
  * at the boundary and API error payloads become thrown messages.
  */

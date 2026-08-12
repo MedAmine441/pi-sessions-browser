@@ -11,13 +11,16 @@ import {
   MessageSquare,
   Plus,
   Search,
+  Sparkles,
 } from "lucide-react";
 import type { SearchHit } from "@/types";
 import {
+  backgroundEffectsEnabled,
   fetchJson,
   localDateKey,
   messageOf,
   OPEN_PALETTE,
+  setBackgroundEffectsEnabled,
   shortenPath,
 } from "@/lib/utils";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -192,6 +195,17 @@ export default function CommandPalette() {
           const params = new URLSearchParams(searchParams.toString());
           params.delete("session");
           router.push(`/stats?${params.toString()}`);
+        },
+      },
+      {
+        key: "cmd-effects",
+        group: "Commands",
+        icon: <Sparkles className="h-4 w-4 text-amber-400" aria-hidden="true" />,
+        title: "Toggle background effects",
+        detail: "Turn the liquid and ember canvases off to save GPU and battery",
+        run: () => {
+          setOpen(false);
+          setBackgroundEffectsEnabled(!backgroundEffectsEnabled());
         },
       },
     ];
