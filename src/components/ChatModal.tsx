@@ -2,7 +2,7 @@
 
 import { memo, useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw, Cpu, GitFork, FileDown, Archive, ListTree, Search, Share2 } from "lucide-react";
+import { Terminal, Folder, X, Pencil, Check, ChevronDown, ChevronUp, RefreshCw, Cpu, GitFork, FileDown, Archive, ListTree, Paperclip, Search, Share2 } from "lucide-react";
 import { Message, MessagePart, PiState, SessionDetail, SessionModel } from "@/types";
 import { fetchJson, formatCost, formatTokens, localDateKey, messageOf } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -111,6 +111,26 @@ type RpcStreamPayload =
 /** What the edit box should hold: the message's first text part. */
 const editableTextOf = (m: Message) =>
   m.parts?.find((part) => part.type === "text")?.text ?? m.text;
+
+/** A pasted or picked image, read into pi's base64 ImageContent fields. */
+type PendingImage = { data: string; mimeType: string };
+
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+const imageFromFile = (file: File) =>
+  new Promise<PendingImage>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () =>
+      reject(new Error(`Could not read ${file.name || "that image"}.`));
+    reader.onload = () => {
+      const url = String(reader.result || "");
+      const at = url.indexOf(",");
+      if (at === -1)
+        return reject(new Error(`Could not read ${file.name || "that image"}.`));
+      resolve({ data: url.slice(at + 1), mimeType: file.type || "image/png" });
+    };
+    reader.readAsDataURL(file);
+  });
 
 // Compaction and branch entries can arrive without a timestamp; showing
 // nothing beats showing "Invalid Date". Module-scoped so the memoized
@@ -414,6 +434,7 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameInput, setRenameInput] = useState("");
   const [chatInput, setChatInput] = useState("");
+  const [attachments, setAttachments] = useState<PendingImage[]>([]);
   const [isThinking, setIsThinking] = useState(false);
   const [pickingModel, setPickingModel] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -429,8 +450,43 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
   const [cmdDismissed, setCmdDismissed] = useState(false);
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const chatFormRef = useRef<HTMLFormElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef, chatInputRef);
+
+  // Attachments belong to the session they were staged for.
+  const [prevFile, setPrevFile] = useState(file);
+  if (prevFile !== file) {
+    setPrevFile(file);
+    setAttachments([]);
+  }
+
+  const addImages = async (files: File[]) => {
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    if (!images.length) return;
+    for (const image of images) {
+      if (image.size > MAX_IMAGE_BYTES) {
+        toast(`${image.name || "That image"} is larger than 10 MB.`);
+        continue;
+      }
+      try {
+        const pending = await imageFromFile(image);
+        setAttachments((prev) => [...prev, pending]);
+      } catch (err) {
+        toast(messageOf(err));
+      }
+    }
+  };
+
+  const onChatInputPaste = (e: React.ClipboardEvent) => {
+    const files = [...e.clipboardData.items]
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((f): f is File => f !== null);
+    if (!files.length) return;
+    e.preventDefault();
+    addImages(files);
+  };
 
   const [agentState, setAgentState] = useState<AgentState>("idle");
   const [activeTool, setActiveTool] = useState("");
@@ -821,6 +877,29 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
 
     const message = chatInput.trim();
     setChatInput("");
+
+    // With images staged, everything is a prompt — "/fork" beside a
+    // screenshot is a message about forking, not the command.
+    if (attachments.length > 0) {
+      const images = attachments;
+      setAttachments([]);
+      try {
+        const data = await fetchJson<{ queued: boolean }>("/api/rpc/prompt", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file: sessionDetail.file, message, images }),
+        });
+        if (data.queued)
+          toast("Queued — pi picks it up when the current run settles.");
+      } catch (err) {
+        // The one-shot `pi -p` fallback cannot carry images; restage them
+        // so nothing is lost.
+        setAttachments(images);
+        setChatInput(message);
+        toast(messageOf(err));
+      }
+      return;
+    }
 
     // Slash commands typed into the chat behave like pi's own.
     if (message === "/quit") {
@@ -1428,6 +1507,31 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
               This session&apos;s file is gone or can no longer be streamed.
             </div>
           )}
+          {attachments.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-2" aria-label="Staged image attachments">
+              {attachments.map((image, index) => (
+                <div key={index} className="group/thumb relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- data URI, not an asset */}
+                  <img
+                    src={`data:${image.mimeType};base64,${image.data}`}
+                    alt={`Attachment ${index + 1}`}
+                    className="h-16 w-16 rounded-xl border border-white/10 object-cover"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() =>
+                      setAttachments((prev) => prev.filter((_, i) => i !== index))
+                    }
+                    className="absolute -right-1.5 -top-1.5 rounded-full border border-white/10 bg-stone-950 text-stone-400 opacity-0 shadow group-hover/thumb:opacity-100 focus-visible:opacity-100 hover:bg-red-500/20 hover:text-red-300 dark:hover:bg-red-500/20"
+                    aria-label={`Remove attachment ${index + 1}`}
+                  >
+                    <X className="h-3 w-3" aria-hidden="true" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
           <form ref={chatFormRef} onSubmit={handleSendMessage} className="flex gap-3 relative">
             {cmdSuggestions.length > 0 && (
               <div className="absolute bottom-full left-0 right-0 z-10 mb-2 overflow-hidden rounded-2xl border border-white/10 bg-stone-950/95 shadow-xl backdrop-blur-xl">
@@ -1480,11 +1584,35 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
                 setCmdDismissed(false);
               }}
               onKeyDown={onChatInputKeyDown}
+              onPaste={onChatInputPaste}
               disabled={sessionGone}
               placeholder="Send a message… ( / for commands, Shift+Enter for a new line )"
               aria-label="Message to send to this session"
               className="custom-scrollbar flex-1 resize-none bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-stone-200 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 shadow-inner placeholder-stone-500 transition-all disabled:opacity-50"
             />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                addImages([...(e.target.files || [])]);
+                e.target.value = "";
+              }}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={sessionGone}
+              className="h-auto self-stretch rounded-2xl border border-white/10 bg-black/40 px-3 text-stone-400 hover:bg-white/10 dark:hover:bg-white/10 hover:text-amber-300"
+              title="Attach images (or paste one into the message box)"
+              aria-label="Attach images"
+            >
+              <Paperclip className="h-4 w-4" aria-hidden="true" />
+            </Button>
             <Button
               type="submit"
               disabled={!chatInput.trim() || isThinking || sessionGone}
