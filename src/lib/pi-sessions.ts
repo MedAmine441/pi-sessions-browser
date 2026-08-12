@@ -344,6 +344,7 @@ export async function readSessionCwd(file: string) {
 type Cached<T> = { size: number; mtimeMs: number; value: T };
 const hasMessagesCache = new Map<string, Cached<boolean>>();
 const summaryCache = new Map<string, Cached<ReturnType<typeof summarize>>>();
+const searchDocCache = new Map<string, Cached<SearchDoc>>();
 
 function cacheGet<T>(
   cache: Map<string, Cached<T>>,
@@ -359,6 +360,7 @@ function cacheGet<T>(
 function dropFromCaches(file: string) {
   hasMessagesCache.delete(file);
   summaryCache.delete(file);
+  searchDocCache.delete(file);
   fileCwdCache.delete(file);
 }
 
@@ -682,6 +684,53 @@ export type SearchResult = ReturnType<typeof summarize> & {
   date: string | null;
 };
 
+/** What one file contributes to search: its summary and matchable text. */
+type SearchDoc = { summary: ReturnType<typeof summarize>; haystacks: string[] };
+
+/** Roughly how many files' search text stays in memory between queries. */
+const SEARCH_CACHE_MAX = 500;
+
+/**
+ * The searchable content of one file, cached on (size, mtime) — repeated
+ * queries (every palette keystroke) scan memory instead of re-reading
+ * every session file from disk.
+ */
+async function searchDoc(file: string): Promise<SearchDoc | null> {
+  let stat;
+  try {
+    stat = await fs.stat(file);
+  } catch {
+    return null;
+  }
+  const known = cacheGet(searchDocCache, file, stat);
+  if (known) return known.value;
+  let loaded;
+  try {
+    loaded = await load(file);
+  } catch {
+    return null; // oversized or unreadable — skip, same as listings do
+  }
+  const summary = summarize(file, loaded.stat, loaded.entries);
+  summaryCache.set(file, {
+    size: loaded.stat.size,
+    mtimeMs: loaded.stat.mtimeMs,
+    value: summary,
+  });
+  const haystacks = loaded.entries
+    .filter((entry) => entry.type === "message")
+    .map(searchableTextOf)
+    .filter(Boolean);
+  // A full clear beats LRU bookkeeping at this scale; the next query warms
+  // the cache right back up from the summary reads.
+  if (searchDocCache.size >= SEARCH_CACHE_MAX) searchDocCache.clear();
+  searchDocCache.set(file, {
+    size: loaded.stat.size,
+    mtimeMs: loaded.stat.mtimeMs,
+    value: { summary, haystacks },
+  });
+  return { summary, haystacks };
+}
+
 /**
  * Full-text search across session files: a bounded line-scan, no index.
  * Matches session names and message text (including thinking and bash runs);
@@ -699,15 +748,9 @@ export async function searchSessions(
   let found = 0;
   const matches = await mapLimit(files, 16, async (file) => {
     if (found >= limit * 2) return null; // enough candidates to rank
-    let loaded;
-    try {
-      loaded = await load(file);
-    } catch {
-      return null; // oversized or unreadable — skip, same as listings do
-    }
-    const { stat, entries } = loaded;
-    const summary = summarize(file, stat, entries);
-    if (summary.messageCount === 0) return null;
+    const doc = await searchDoc(file);
+    if (!doc || doc.summary.messageCount === 0) return null;
+    const { summary, haystacks } = doc;
 
     let snippet: string | null = null;
     let matchedIn: SearchResult["matchedIn"] = "message";
@@ -715,9 +758,8 @@ export async function searchSessions(
       snippet = summary.name;
       matchedIn = "name";
     } else {
-      for (const entry of entries) {
-        if (entry.type !== "message") continue;
-        snippet = snippetAround(searchableTextOf(entry), needle);
+      for (const haystack of haystacks) {
+        snippet = snippetAround(haystack, needle);
         if (snippet) break;
       }
     }

@@ -180,7 +180,9 @@ export default function SessionsGrid({ date }: { date: string }) {
       });
       announceLocationsChanged();
     } catch (err) {
+      // The refresh below restores the card the optimistic filter removed.
       console.error(err);
+      toast(`Could not delete the session: ${messageOf(err)}`);
     } finally {
       refreshSessions();
     }

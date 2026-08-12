@@ -112,8 +112,11 @@ export default function CommandPalette() {
             setHits(data.results || []);
             setSearching(false);
           })
-          .catch(() => {
-            if (!controller.signal.aborted) setSearching(false);
+          .catch((err) => {
+            if (controller.signal.aborted) return;
+            setSearching(false);
+            // A failed search must not read as "nothing matches".
+            toast(`Search failed: ${messageOf(err)}`);
           });
       },
       needle.length < 2 ? 0 : 250,

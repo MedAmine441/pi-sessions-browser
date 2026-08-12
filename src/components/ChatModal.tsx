@@ -1023,6 +1023,13 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
         toast("Queued — pi picks it up when the current run settles.");
       return;
     } catch (err) {
+      // A busy pi (compacting) still owns the session file; a one-shot pi
+      // writing beside it would interleave two writers on one JSONL.
+      if (/compaction/i.test(messageOf(err))) {
+        setChatInput(message);
+        toast(messageOf(err));
+        return;
+      }
       console.warn("RPC prompt failed, falling back to one-shot pi:", err);
     }
 
