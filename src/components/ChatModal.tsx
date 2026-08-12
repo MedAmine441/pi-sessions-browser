@@ -41,6 +41,12 @@ const LOCAL_COMMANDS = [
   { cmd: "/quit", desc: "Close this chat" },
 ] as const;
 
+/** One row of the slash autocomplete, local or fetched from pi. */
+type CmdSuggestion = { cmd: string; desc: string; args?: string; badge?: string };
+
+/** A slash command pi reports via get_commands: extension, prompt, or skill. */
+type PiCommand = { name: string; description: string; source: string };
+
 type DeltaEvent = {
   type: string;
   contentIndex?: number;
@@ -454,12 +460,38 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef, chatInputRef);
 
-  // Attachments belong to the session they were staged for.
+  /** Pi's own commands for this session; null until first requested. */
+  const [piCommands, setPiCommands] = useState<PiCommand[] | null>(null);
+  const piCommandsRequested = useRef(false);
+
+  // Attachments and fetched commands belong to the session they came from.
   const [prevFile, setPrevFile] = useState(file);
   if (prevFile !== file) {
     setPrevFile(file);
     setAttachments([]);
+    setPiCommands(null);
   }
+
+  // Refs must not be written during render; this reset effect is declared
+  // before the fetch effect so a new file re-arms the request first.
+  useEffect(() => {
+    piCommandsRequested.current = false;
+  }, [file]);
+
+  // The first "/" fetches pi's extension/prompt/skill commands, spawning the
+  // session's RPC process if needed — whoever is typing a command is about
+  // to need that process anyway, and pre-warming makes the first send fast.
+  useEffect(() => {
+    if (!chatInput.startsWith("/") || piCommandsRequested.current || sessionGone)
+      return;
+    piCommandsRequested.current = true;
+    fetchJson<{ commands: PiCommand[] }>(
+      `/api/rpc/commands?file=${encodeURIComponent(file)}`,
+    )
+      .then((data) => setPiCommands(data.commands || []))
+      // Pi being unavailable only loses its commands, never the local ones.
+      .catch(() => setPiCommands([]));
+  }, [chatInput, file, sessionGone]);
 
   const addImages = async (files: File[]) => {
     const images = files.filter((f) => f.type.startsWith("image/"));
@@ -1079,19 +1111,33 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
   };
 
   // Slash-command autocomplete: live while the input is a single "/word".
-  const cmdSuggestions = useMemo(() => {
+  // Local browser verbs come first; pi's own commands follow, deduped so a
+  // pi command can never shadow a local one.
+  const cmdSuggestions = useMemo<CmdSuggestion[]>(() => {
     if (cmdDismissed) return [];
     const value = chatInput;
     if (!value.startsWith("/") || /[\s\n]/.test(value)) return [];
-    return LOCAL_COMMANDS.filter((c) => c.cmd.startsWith(value));
-  }, [chatInput, cmdDismissed]);
+    const local: CmdSuggestion[] = LOCAL_COMMANDS.filter((c) =>
+      c.cmd.startsWith(value),
+    ).map((c) => ({ cmd: c.cmd, desc: c.desc, args: "args" in c ? c.args : undefined }));
+    const localNames = new Set<string>(LOCAL_COMMANDS.map((c) => c.cmd));
+    const remote: CmdSuggestion[] = (piCommands || [])
+      .map((c) => ({
+        cmd: `/${c.name}`,
+        desc: c.description || `pi ${c.source} command`,
+        badge: c.source,
+      }))
+      .filter((c) => c.cmd.startsWith(value) && !localNames.has(c.cmd))
+      .sort((a, b) => a.cmd.localeCompare(b.cmd));
+    return [...local, ...remote].slice(0, 12);
+  }, [chatInput, cmdDismissed, piCommands]);
   const cmdIndex = Math.min(cmdAt, Math.max(0, cmdSuggestions.length - 1));
 
   /** Complete to the highlighted command; arg commands get a ready space. */
   const completeCommand = () => {
     const suggestion = cmdSuggestions[cmdIndex];
     if (!suggestion) return;
-    setChatInput(suggestion.cmd + ("args" in suggestion && suggestion.args ? " " : ""));
+    setChatInput(suggestion.cmd + (suggestion.args ? " " : ""));
     setCmdAt(0);
   };
 
@@ -1542,10 +1588,7 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
                         type="button"
                         onClick={() => {
                           setCmdAt(index);
-                          setChatInput(
-                            suggestion.cmd +
-                              ("args" in suggestion && suggestion.args ? " " : ""),
-                          );
+                          setChatInput(suggestion.cmd + (suggestion.args ? " " : ""));
                           chatInputRef.current?.focus();
                         }}
                         onMouseMove={() => setCmdAt(index)}
@@ -1557,7 +1600,7 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
                       >
                         <span className="font-mono font-bold">
                           {suggestion.cmd}
-                          {"args" in suggestion && suggestion.args ? (
+                          {suggestion.args ? (
                             <span className="ml-1 font-normal text-stone-500">
                               {suggestion.args}
                             </span>
@@ -1566,6 +1609,11 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
                         <span className="min-w-0 flex-1 truncate text-xs text-stone-500">
                           {suggestion.desc}
                         </span>
+                        {suggestion.badge && (
+                          <span className="shrink-0 rounded-md bg-white/5 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-stone-500">
+                            {suggestion.badge}
+                          </span>
+                        )}
                       </button>
                     </li>
                   ))}
