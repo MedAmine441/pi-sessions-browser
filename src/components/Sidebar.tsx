@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { FolderGit2, Menu, Pin, Search, X } from "lucide-react";
+import { BarChart3, FolderGit2, Menu, Pin, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { SessionInfo } from "@/types";
 import {
@@ -196,6 +196,21 @@ export default function Sidebar() {
           <kbd className="shrink-0 rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-stone-500">
             Ctrl K
           </kbd>
+        </Button>
+
+        <Button
+          variant="ghost"
+          onClick={() => {
+            const params = new URLSearchParams(window.location.search);
+            params.delete("session");
+            router.push(`/stats?${params.toString()}`);
+            setIsOpen(false);
+          }}
+          title="Cost and token usage across sessions"
+          className="mb-4 h-auto w-full justify-start gap-3 rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-left text-sm text-stone-400 hover:bg-stone-900 dark:hover:bg-stone-900 hover:text-stone-200"
+        >
+          <BarChart3 className="w-4 h-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">Stats</span>
         </Button>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">

@@ -233,15 +233,19 @@ function summarize(file: string, stat: Stats, entries: SessionEntry[]) {
   const firstUser = messages.find((entry) => entry.message?.role === "user");
   const last = entries.at(-1);
 
-  // Dollar cost accumulates from every usage-bearing entry: assistant turns,
-  // tool-nested LLM work, compaction and branch summaries alike.
+  // Dollar cost and tokens accumulate from every usage-bearing entry:
+  // assistant turns, tool-nested LLM work, compaction and branch summaries.
   let cost = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
   let hasError = false;
   for (const entry of entries) {
     const usage = usageFrom(
       entry.type === "message" ? entry.message?.usage : entry.usage,
     );
     if (usage?.cost?.total) cost += usage.cost.total;
+    if (usage?.input) inputTokens += usage.input;
+    if (usage?.output) outputTokens += usage.output;
     // A user-initiated abort also writes an errorMessage ("Request was
     // aborted"); pressing Stop must not flag the session as failed.
     if (
@@ -263,6 +267,8 @@ function summarize(file: string, stat: Stats, entries: SessionEntry[]) {
     preview: short(textFrom(firstUser?.message?.content) || "No user message"),
     size: stat.size,
     cost,
+    inputTokens,
+    outputTokens,
     hasError,
     model: modelFromEntries(entries),
   };

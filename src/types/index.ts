@@ -10,6 +10,9 @@ export type SessionInfo = {
   size: number;
   /** Summed usage.cost.total across every entry that carries usage. */
   cost: number;
+  /** Summed usage input/output tokens across every entry that carries usage. */
+  inputTokens: number;
+  outputTokens: number;
   /** True when any assistant message ended in an error. */
   hasError: boolean;
   /** The model the session is currently on (pi's restore rule). */
@@ -97,6 +100,24 @@ export type SessionTreeNode = {
 };
 
 export type SessionTree = { nodes: SessionTreeNode[]; leafId: string | null };
+
+/** One aggregation row of /api/stats, keyed by day, model, or folder. */
+export type StatsBucket = {
+  key: string;
+  sessions: number;
+  messages: number;
+  cost: number;
+  inputTokens: number;
+  outputTokens: number;
+};
+
+/** What /api/stats reports: usage aggregated across every session on disk. */
+export type SessionStats = {
+  totals: Omit<StatsBucket, "key">;
+  perDay: StatsBucket[];
+  perModel: StatsBucket[];
+  perFolder: StatsBucket[];
+};
 
 /** What /api/pi/state reports about pi's own auth and model settings. */
 export type PiAccount = { provider: string; type: "oauth" | "api_key" };

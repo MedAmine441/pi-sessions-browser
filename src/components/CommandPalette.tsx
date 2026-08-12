@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  BarChart3,
   Clock,
   CornerDownLeft,
   Folder,
@@ -179,6 +180,18 @@ export default function CommandPalette() {
           const params = new URLSearchParams(searchParams.toString());
           params.delete("location");
           router.push(`/?${params.toString()}`);
+        },
+      },
+      {
+        key: "cmd-stats",
+        group: "Commands",
+        icon: <BarChart3 className="h-4 w-4 text-amber-400" aria-hidden="true" />,
+        title: "Open stats",
+        run: () => {
+          setOpen(false);
+          const params = new URLSearchParams(searchParams.toString());
+          params.delete("session");
+          router.push(`/stats?${params.toString()}`);
         },
       },
     ];

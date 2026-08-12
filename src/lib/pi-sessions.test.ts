@@ -268,6 +268,8 @@ describe("Pi session storage", () => {
     const [listed] = await sessions.listSessions();
     expect(listed.cost).toBeCloseTo(0.01076, 10);
     expect(listed.hasError).toBe(true);
+    expect(listed.inputTokens).toBe(2100);
+    expect(listed.outputTokens).toBe(520);
   });
 
   it("does not flag a session as failed for a user-initiated abort", async () => {
