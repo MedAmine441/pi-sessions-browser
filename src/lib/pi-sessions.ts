@@ -78,7 +78,10 @@ function textFrom(content: unknown): string {
   return (content as ContentPart[])
     .map((part) => {
       if (part?.type === "text") return part.text || "";
-      if (part?.type === "thinking") return "[thinking]";
+      // openai-codex stores an empty thinking block when only a summary
+      // headline exists — nothing there is worth a placeholder.
+      if (part?.type === "thinking")
+        return part.thinking?.trim() ? "[thinking]" : "";
       if (part?.type === "toolCall") return `[tool: ${part.name}]`;
       if (part?.type === "image") return "[image]";
       return "";
@@ -94,7 +97,11 @@ function partsFrom(content: unknown): MessagePart[] | undefined {
   for (const raw of content as ContentPart[]) {
     if (raw?.type === "text" && typeof raw.text === "string")
       parts.push({ type: "text", text: raw.text });
-    else if (raw?.type === "thinking" && typeof raw.thinking === "string")
+    else if (
+      raw?.type === "thinking" &&
+      typeof raw.thinking === "string" &&
+      raw.thinking.trim()
+    )
       parts.push({ type: "thinking", thinking: raw.thinking });
     else if (raw?.type === "toolCall")
       parts.push({
@@ -235,8 +242,11 @@ function summarize(file: string, stat: Stats, entries: SessionEntry[]) {
       entry.type === "message" ? entry.message?.usage : entry.usage,
     );
     if (usage?.cost?.total) cost += usage.cost.total;
+    // A user-initiated abort also writes an errorMessage ("Request was
+    // aborted"); pressing Stop must not flag the session as failed.
     if (
       entry.message?.role === "assistant" &&
+      entry.message.stopReason !== "aborted" &&
       (entry.message.stopReason === "error" || entry.message.errorMessage)
     )
       hasError = true;

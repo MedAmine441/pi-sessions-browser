@@ -270,6 +270,64 @@ describe("Pi session storage", () => {
     expect(listed.hasError).toBe(true);
   });
 
+  it("does not flag a session as failed for a user-initiated abort", async () => {
+    // Pressing Stop writes stopReason "aborted" plus an errorMessage of
+    // "Request was aborted" — that is not an error the card should surface.
+    await writeSession("project/aborted.jsonl", [
+      { type: "session", id: "aborted", cwd: "/work", timestamp: "2026-01-01T10:00:00.000Z" },
+      {
+        type: "message",
+        id: "ask",
+        timestamp: "2026-01-01T10:01:00.000Z",
+        message: { role: "user", content: "Count to 100" },
+      },
+      {
+        type: "message",
+        id: "cut",
+        timestamp: "2026-01-01T10:02:00.000Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "1\n2\n3" }],
+          stopReason: "aborted",
+          errorMessage: "Request was aborted",
+        },
+      },
+    ]);
+
+    const [listed] = await sessions.listSessions();
+    expect(listed.hasError).toBe(false);
+  });
+
+  it("drops empty thinking blocks from parts and previews", async () => {
+    // openai-codex stores thinking: "" when only a summary headline exists.
+    const file = await writeSession("project/headline.jsonl", [
+      { type: "session", id: "headline", cwd: "/work", timestamp: "2026-01-01T10:00:00.000Z" },
+      {
+        type: "message",
+        id: "ask",
+        timestamp: "2026-01-01T10:01:00.000Z",
+        message: { role: "user", content: "hi" },
+      },
+      {
+        type: "message",
+        id: "reply",
+        timestamp: "2026-01-01T10:02:00.000Z",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "" },
+            { type: "text", text: "done" },
+          ],
+        },
+      },
+    ]);
+
+    const conversation = await sessions.getConversation(file);
+    const reply = conversation.items.find((item) => item.id === "reply");
+    expect(reply?.parts).toEqual([{ type: "text", text: "done" }]);
+    expect(reply?.text).toBe("done");
+  });
+
   it("parses the UTC timestamp out of session filenames", () => {
     expect(
       sessions

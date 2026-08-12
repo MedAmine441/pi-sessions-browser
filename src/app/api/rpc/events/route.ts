@@ -43,9 +43,13 @@ export async function GET(request: Request) {
             if (role === "assistant") send({ kind: "message_start" });
             return;
           }
-          case "message_end":
-            send({ kind: "message_end" });
+          case "message_end": {
+            // User and tool messages end too; only the assistant's end marks
+            // the live bubble as settled.
+            const role = (event.message as { role?: string } | undefined)?.role;
+            if (role === "assistant") send({ kind: "message_end" });
             return;
+          }
           case "agent_start":
             send({ kind: "status", state: "streaming" });
             return;

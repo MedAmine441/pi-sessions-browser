@@ -362,7 +362,9 @@ function MessageItem({
               compacted from {formatTokens(m.tokensBefore)} tokens
             </div>
           )}
-          {m.role === "assistant" && m.errorMessage && (
+          {/* An abort writes "Request was aborted" as errorMessage; the
+              "aborted" badge already tells that story without a red box. */}
+          {m.role === "assistant" && m.errorMessage && m.stopReason !== "aborted" && (
             <div className="mt-2 rounded-lg border border-red-500/30 bg-red-950/30 px-3 py-2 font-mono text-xs whitespace-pre-wrap text-red-300">
               {m.errorMessage}
             </div>
@@ -420,10 +422,28 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
   const [activeTool, setActiveTool] = useState("");
   /** Parts of the assistant message currently streaming; null when none. */
   const [streamingParts, setStreamingParts] = useState<MessagePart[] | null>(null);
+  /**
+   * True between the RPC message_end and the persisted message arriving via
+   * the file stream. Clearing the bubble on message_end alone leaves a
+   * 50-100ms gap where the finished reply vanishes and reappears; instead the
+   * bubble stays up until the file append lands (with a timeout backstop).
+   */
+  const settlingRef = useRef(false);
+  const settleTimerRef = useRef<NodeJS.Timeout | null>(null);
   const agentStateRef = useRef(agentState);
   useEffect(() => {
     agentStateRef.current = agentState;
   }, [agentState]);
+
+  const clearStreaming = useCallback(() => {
+    settlingRef.current = false;
+    if (settleTimerRef.current) {
+      clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = null;
+    }
+    setStreamingParts(null);
+  }, []);
+  useEffect(() => clearStreaming, [clearStreaming]);
 
   // Model catalog, for the context-window size of the session's model.
   const [piModels, setPiModels] = useState<PiState["models"] | null>(null);
@@ -449,7 +469,15 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
         if (payload.kind === "snapshot") {
           setSessionGone(false);
           setSessionDetail(payload.detail);
+          if (settlingRef.current) clearStreaming();
         } else if (payload.kind === "append") {
+          // The settled assistant message replaces the live bubble in the
+          // same render, so the handoff is seamless.
+          if (
+            settlingRef.current &&
+            payload.items.some((item) => item.role === "assistant")
+          )
+            clearStreaming();
           setSessionDetail((prev) => {
             if (!prev) return prev;
             const items = [...prev.items];
@@ -479,7 +507,7 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
       }
     };
     return () => eventSource.close();
-  }, [file]);
+  }, [file, clearStreaming]);
 
   useEffect(() => {
     // Missing state (pi not configured) just hides the context gauge.
@@ -503,20 +531,34 @@ export default function ChatModal({ file, onClose }: { file: string; onClose: (d
       if (payload.kind === "status") {
         setAgentState(payload.state);
         setActiveTool(payload.state === "tool" ? payload.toolName || "tool" : "");
-        if (payload.state === "idle") setStreamingParts(null);
+        if (payload.state === "idle") {
+          // Mid-settle, wait for the file append (with a backstop) instead
+          // of blanking the finished reply before its persisted twin shows.
+          if (settlingRef.current) {
+            if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+            settleTimerRef.current = setTimeout(clearStreaming, 1500);
+          } else {
+            clearStreaming();
+          }
+        }
       } else if (payload.kind === "message_start") {
+        settlingRef.current = false;
+        if (settleTimerRef.current) {
+          clearTimeout(settleTimerRef.current);
+          settleTimerRef.current = null;
+        }
         setStreamingParts([]);
       } else if (payload.kind === "message_end") {
-        setStreamingParts(null);
+        settlingRef.current = true;
       } else if (payload.kind === "delta") {
         setStreamingParts((prev) => applyDelta(prev ?? [], payload.event));
       } else if (payload.kind === "closed") {
         setAgentState("idle");
-        setStreamingParts(null);
+        clearStreaming();
       }
     };
     return () => events.close();
-  }, [file]);
+  }, [file, clearStreaming]);
 
   // Closing the chat retires an idle pi process; a mid-run one is left to
   // finish (or idle out) so closing the window never kills a running turn.
